@@ -87,6 +87,7 @@ def _validate_args(args: MultiGpuArgs) -> None:
 def _build_command(
     config_path: Path,
     num_episodes: int,
+    gpu: int,
     args: MultiGpuArgs,
 ) -> list[str]:
     command = [
@@ -99,7 +100,7 @@ def _build_command(
         "--num-episodes",
         str(num_episodes),
         "--device",
-        "cuda:0",
+        f"cuda:{gpu}",
         "--viz",
         "none",
         "--rendering-mode",
@@ -108,6 +109,14 @@ def _build_command(
     if args.no_frames:
         command.append("--no-frames")
     return command
+
+
+def _build_worker_environment() -> dict[str, str]:
+    """Build an Isaac Sim environment without CUDA/Vulkan device remapping."""
+
+    environment = os.environ.copy()
+    environment.pop("CUDA_VISIBLE_DEVICES", None)
+    return environment
 
 
 def _terminate_workers(workers: list[Worker]) -> None:
@@ -180,7 +189,7 @@ def main() -> int:
             encoding="utf-8",
         )
         log_path = run_dir / f"worker_{worker_id:03d}_gpu_{gpu}.log"
-        command = _build_command(config_path, worker_episodes, args)
+        command = _build_command(config_path, worker_episodes, gpu, args)
         worker_specs.append(
             (
                 worker_id,
@@ -213,8 +222,7 @@ def main() -> int:
             log_path,
             command,
         ) in worker_specs:
-            environment = os.environ.copy()
-            environment["CUDA_VISIBLE_DEVICES"] = str(gpu)
+            environment = _build_worker_environment()
             log_file = log_path.open("w", encoding="utf-8")
             try:
                 process = subprocess.Popen(

@@ -45,10 +45,12 @@ uv run python scripts/generate_multi_gpu.py \
   --workers-per-gpu 2
 ```
 
-脚本为每个 worker 设置独立的 `CUDA_VISIBLE_DEVICES`，自动生成临时配置和
-日志目录。所有 worker 共享基础配置中的 `output_root`，但 seed 不重叠，
-因此默认生成的 run ID 不会冲突。任一 worker 失败或收到 Ctrl+C 时，脚本
-会停止同一批次的其他 worker。正式运行前可以添加 `--dry-run` 检查分片。
+脚本为每个 worker 显式设置 Isaac Lab 的 `cuda:<GPU>` 设备，并清除子进程的
+`CUDA_VISIBLE_DEVICES`，避免 CUDA 与 Vulkan 的 GPU 枚举不一致。worker 默认
+通过 `--viz none` 以 headless 模式启动，并自动生成临时配置和日志目录。所有
+worker 共享基础配置中的 `output_root`，但 seed 不重叠，因此默认生成的 run ID
+不会冲突。任一 worker 失败或收到 Ctrl+C 时，脚本会停止同一批次的其他
+worker。正式运行前可以添加 `--dry-run` 检查分片。
 
 查看完整参数：
 

@@ -1,4 +1,5 @@
 import importlib.util
+import os
 import sys
 from pathlib import Path
 
@@ -30,3 +31,30 @@ def test_split_episode_ranges_skips_idle_workers() -> None:
     module = _load_script_module()
 
     assert module.split_episode_ranges(2, 8, 100) == [(100, 1), (101, 1)]
+
+
+def test_build_command_selects_physical_gpu_and_disables_visualizers(
+    tmp_path: Path,
+) -> None:
+    module = _load_script_module()
+    args = module.MultiGpuArgs(config=tmp_path / "config.yaml", num_episodes=4)
+
+    command = module._build_command(tmp_path / "worker.yaml", 2, 3, args)
+
+    assert command[command.index("--device") + 1] == "cuda:3"
+    assert command[command.index("--viz") + 1] == "none"
+    assert "--headless" not in command
+
+
+def test_build_worker_environment_removes_cuda_device_remapping(
+    monkeypatch,
+) -> None:
+    module = _load_script_module()
+    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "3")
+    monkeypatch.setenv("PHY_DATA_GEN_TEST_VALUE", "kept")
+
+    environment = module._build_worker_environment()
+
+    assert "CUDA_VISIBLE_DEVICES" not in environment
+    assert environment["PHY_DATA_GEN_TEST_VALUE"] == "kept"
+    assert os.environ["CUDA_VISIBLE_DEVICES"] == "3"
