@@ -11,6 +11,9 @@ num_objects: 0
 scene:
   name: billiards
   object_mode: replace_assets
+  # Keep the high-speed cue ball unchanged so its original trajectory is preserved.
+  # Set to true to replace both the cue ball and the balls it hits.
+  replace_initially_moving_objects: false
   world_prim: /World
   physics_scene_prim: /PhysicsScene
   ground_prim: /World/TableSurface

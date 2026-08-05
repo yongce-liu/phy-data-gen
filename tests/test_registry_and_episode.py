@@ -189,3 +189,59 @@ def test_replace_assets_samples_local_assets_for_template_rigid_bodies(
     assert replacement.asset_path == str(asset_path.resolve())
     assert replacement.scale == pytest.approx(1.0)
     assert replacement.asset_rigid_body_path is None
+
+
+def test_replace_assets_can_preserve_initially_moving_body(tmp_path: Path) -> None:
+    from pxr import Usd, UsdGeom, UsdPhysics
+
+    template_path = tmp_path / "templates" / "scene.usda"
+    template_path.parent.mkdir()
+    template_stage = Usd.Stage.CreateNew(str(template_path))
+    world = UsdGeom.Xform.Define(template_stage, "/World").GetPrim()
+    template_stage.SetDefaultPrim(world)
+    moving = UsdGeom.Xform.Define(template_stage, "/World/CueBall").GetPrim()
+    UsdPhysics.RigidBodyAPI.Apply(moving).CreateVelocityAttr((8.0, 0.0, 0.0))
+    UsdGeom.Sphere.Define(template_stage, "/World/CueBall/Geometry")
+    target = UsdGeom.Xform.Define(template_stage, "/World/TargetBall").GetPrim()
+    UsdPhysics.RigidBodyAPI.Apply(target).CreateVelocityAttr((0.0, 0.0, 0.0))
+    UsdGeom.Sphere.Define(template_stage, "/World/TargetBall/Geometry")
+    template_stage.GetRootLayer().Save()
+
+    asset_path = tmp_path / "assets" / "cup.usda"
+    asset_path.parent.mkdir()
+    asset_stage = Usd.Stage.CreateNew(str(asset_path))
+    asset_root = UsdGeom.Xform.Define(asset_stage, "/Cup").GetPrim()
+    asset_stage.SetDefaultPrim(asset_root)
+    collider = UsdGeom.Cube.Define(asset_stage, "/Cup/Collider").GetPrim()
+    UsdPhysics.CollisionAPI.Apply(collider)
+    asset_stage.GetRootLayer().Save()
+
+    registry_path = tmp_path / "registry.json"
+    save_registry(
+        [
+            AssetRecord(
+                asset_id="cup",
+                usd_path=str(asset_path),
+                bbox_size=(2.0, 2.0, 2.0),
+                max_dimension=2.0,
+                has_rigid_body=False,
+                has_collision=True,
+                articulated=False,
+            )
+        ],
+        registry_path,
+    )
+    config = replace(
+        _config(tmp_path, registry_path),
+        scene=replace(
+            _config(tmp_path, registry_path).scene,
+            object_mode="replace_assets",
+            replace_initially_moving_objects=False,
+        ),
+    )
+
+    spec = create_episode_spec(config)
+
+    assert [item.target_prim_path for item in spec.replacements] == [
+        "/World/TargetBall"
+    ]

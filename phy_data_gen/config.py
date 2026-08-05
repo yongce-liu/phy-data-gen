@@ -30,6 +30,7 @@ class SceneConfig:
     ground_prim: str
     cameras: dict[str, str]
     dynamic_prims: tuple[str, ...]
+    replace_initially_moving_objects: bool = True
 
 
 @dataclass(frozen=True)
@@ -84,6 +85,9 @@ def load_config(path: Path) -> RunConfig:
         ground_prim=str(scene_raw["ground_prim"]),
         cameras={str(name): str(path) for name, path in scene_raw["cameras"].items()},
         dynamic_prims=tuple(str(prim) for prim in scene_raw["dynamic_prims"]),
+        replace_initially_moving_objects=bool(
+            scene_raw.get("replace_initially_moving_objects", True)
+        ),
     )
 
     return RunConfig(

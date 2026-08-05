@@ -116,8 +116,9 @@ def _find_template_rigid_body_paths(stage, world_prim_path: str) -> dict[str, st
 def _find_replacement_rigid_body_paths(
     stage,
     episode_spec: EpisodeSpec,
+    world_prim_path: str,
 ) -> dict[str, str]:
-    """Resolve the preserved template rigid bodies used for replacements."""
+    """Resolve replacement bodies and template bodies that were not replaced."""
 
     from pxr import Usd, UsdPhysics
 
@@ -141,6 +142,18 @@ def _find_replacement_rigid_body_paths(
                 f"{matched or 'none'}"
             )
         paths[replacement.object_id] = str(rigid_prims[0].GetPath())
+
+    replacement_targets = {
+        replacement.target_prim_path for replacement in episode_spec.replacements
+    }
+    template_paths = _find_template_rigid_body_paths(stage, world_prim_path)
+    for object_id, prim_path in template_paths.items():
+        if any(
+            prim_path == target or prim_path.startswith(f"{target}/")
+            for target in replacement_targets
+        ):
+            continue
+        paths[object_id] = prim_path
     return paths
 
 
@@ -154,7 +167,11 @@ def _find_rigid_body_paths(
     if episode_spec.object_mode == "template_dynamics":
         return _find_template_rigid_body_paths(stage, world_prim_path)
     if episode_spec.object_mode == "replace_assets":
-        return _find_replacement_rigid_body_paths(stage, episode_spec)
+        return _find_replacement_rigid_body_paths(
+            stage,
+            episode_spec,
+            world_prim_path,
+        )
     raise ValueError(f"Unsupported object mode: {episode_spec.object_mode}")
 
 

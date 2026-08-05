@@ -2,7 +2,10 @@ from pxr import Usd, UsdGeom, UsdPhysics
 
 from phy_data_gen.config import SceneConfig
 from phy_data_gen.scene import _repair_missing_template_primitives, build_scene
-from phy_data_gen.simulation import _find_template_rigid_body_paths
+from phy_data_gen.simulation import (
+    _find_replacement_rigid_body_paths,
+    _find_template_rigid_body_paths,
+)
 from phy_data_gen.schemas import AssetReplacementSpec, EpisodeSpec
 
 
@@ -121,3 +124,42 @@ def test_replaces_geometry_but_preserves_template_rigid_body(tmp_path) -> None:
     ).Get() == (1.0, 2.0, 3.0)
     assert not compiled.GetPrimAtPath("/World/Ball/Original").IsActive()
     assert compiled.GetPrimAtPath("/World/Ball/ReplacementAsset/Asset").IsValid()
+
+
+def test_replacement_recording_includes_non_replaced_template_body() -> None:
+    stage = Usd.Stage.CreateInMemory()
+    stage.DefinePrim("/World", "Xform")
+    cue_ball = stage.DefinePrim("/World/CueBall", "Xform")
+    UsdPhysics.RigidBodyAPI.Apply(cue_ball)
+    replacement_target = stage.DefinePrim("/World/TargetBall", "Xform")
+    replacement_body = stage.DefinePrim(
+        "/World/TargetBall/ReplacementAsset/Body", "Xform"
+    )
+    UsdPhysics.RigidBodyAPI.Apply(replacement_body)
+    spec = EpisodeSpec(
+        episode_id="test",
+        seed=1,
+        template_path="template.usda",
+        backend="physx",
+        object_mode="replace_assets",
+        duration_seconds=1.0,
+        physics_dt=1.0 / 60.0,
+        render_fps=30,
+        objects=[],
+        replacements=[
+            AssetReplacementSpec(
+                object_id="TargetBall",
+                target_prim_path=str(replacement_target.GetPath()),
+                asset_path="asset.usda",
+                scale=1.0,
+                translation=(0.0, 0.0, 0.0),
+            )
+        ],
+    )
+
+    paths = _find_replacement_rigid_body_paths(stage, spec, "/World")
+
+    assert paths == {
+        "TargetBall": "/World/TargetBall/ReplacementAsset/Body",
+        "CueBall": "/World/CueBall",
+    }

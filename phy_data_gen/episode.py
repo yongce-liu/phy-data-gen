@@ -11,6 +11,7 @@ This module has no Isaac Sim runtime dependency; it only reads JSON/YAML.
 from __future__ import annotations
 
 import json
+import math
 import random
 from dataclasses import dataclass
 from pathlib import Path
@@ -159,6 +160,15 @@ def _replacement_targets(
                     dimensions.append(max(float(high[i] - low[i]) for i in range(3)))
         return max(dimensions, default=1.0)
 
+    def is_initially_moving(prim_spec) -> bool:
+        velocity = next(
+            (prop for prop in prim_spec.properties if prop.name == "physics:velocity"),
+            None,
+        )
+        if velocity is None or velocity.default is None:
+            return False
+        return math.sqrt(sum(float(value) ** 2 for value in velocity.default)) > 1e-6
+
     targets_by_path = {}
     if config.scene.dynamic_prims:
         for root in roots:
@@ -194,6 +204,11 @@ def _replacement_targets(
 
     targets = []
     for prim_path, (prim, create_rigid_body) in sorted(targets_by_path.items()):
+        if (
+            not config.scene.replace_initially_moving_objects
+            and is_initially_moving(prim)
+        ):
+            continue
         targets.append((prim_path, primitive_dimension(prim), create_rigid_body))
     return targets
 
@@ -243,11 +258,14 @@ def _sample_replacements(
     template_path: Path,
     rng: random.Random,
 ) -> list[AssetReplacementSpec]:
+    targets = _replacement_targets(template_path, config)
+    if not targets:
+        return []
+
     registry = load_registry(config.registry_path)
     if not registry:
         raise RuntimeError(f"Asset registry is empty or missing: {config.registry_path}")
 
-    targets = _replacement_targets(template_path, config)
     if len(targets) <= len(registry):
         assets = rng.sample(registry, len(targets))
     else:
