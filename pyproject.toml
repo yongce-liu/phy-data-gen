@@ -1,0 +1,34 @@
+[project]
+name = "phy_data_gen"
+version = "0.1.0"
+description = ""
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "isaaclab[all,isaacsim]>=3.0.0b2.post1",
+    "molmospaces-resources>=0.0.1",
+    "numpy>=2.0",
+    "pydantic>=2.0",
+    "pyyaml>=6.0",
+    "tyro>=0.9",
+]
+
+[project.scripts]
+phy-data-gen = "phy_data_gen.cli:main"
+
+[tool.uv.sources.molmo-spaces-isaac]
+git = "https://github.com/allenai/molmospaces.git"
+subdirectory = "molmo_spaces_isaac"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["phy_data_gen"]
+
+[tool.uv]
+prerelease = "allow"
+index-strategy = "unsafe-best-match"
+
+[[tool.uv.index]]
+url = "https://pypi.nvidia.com/"
