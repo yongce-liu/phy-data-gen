@@ -3,6 +3,8 @@ data
 outputs
 .molmospaces
 tmp
+log
+logs
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
