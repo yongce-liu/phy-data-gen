@@ -5,11 +5,13 @@ output_root: outputs
 
 backend: physx
 seed: 42
-num_objects: 10
+template_seed: 42
+num_objects: 0
 
 # Prims resolved from the Cosmos template (see inspect_template output).
 scene:
   name: objects_falling
+  object_mode: replace_assets
   world_prim: /World
   physics_scene_prim: /PhysicsScene
   ground_prim: /World/Ground
@@ -18,22 +20,8 @@ scene:
     Corner: /World/Camera_Corner
     OtherSide: /World/Camera_OtherSide
     TopDown: /World/Camera_TopDown
-  # Dynamic props in the template that must be disabled before inserting
-  # generated objects. Paths come directly from the template, do not guess.
-  dynamic_prims:
-    - /World/Prop_BubbleMarble_01_31503
-    - /World/Prop_tennisball_a01_31624
-    - /World/S871_Plastic_Cone_002
-    - /World/Prop_orange_01_32085
-    - /World/S871_Clear_plastic_Cube_004
-    - /World/Prop_whitepackerbottle_a01_32570
-    - /World/Prop_monarch_32721
-    - /World/Prop_lime01_32873
-    - /World/Prop_Ball_Walnut_33018
-    - /World/Prop_naturalbostonroundbottle_a01_33070
-    - /World/Prop_Ball_Walnut_33196
-    - /World/S871_Wood_Cylinder_011
-    - /World/Prop_pumpkinsmall_33838
+  # Empty means that every rigid body below world_prim is replaced in place.
+  dynamic_prims: []
 
 simulation:
   physics_dt: 0.0020833333333333333

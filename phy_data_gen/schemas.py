@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
+from phy_data_gen.config import ObjectMode
+
 
 class PhysicsMaterialSpec(BaseModel):
     """Isotropic physics material for a dropped object."""
@@ -31,6 +33,18 @@ class ObjectSpec(BaseModel):
     material: PhysicsMaterialSpec
 
 
+class AssetReplacementSpec(BaseModel):
+    """A local asset substituted into an existing template rigid body."""
+
+    object_id: str
+    target_prim_path: str
+    asset_path: str
+    scale: float = Field(gt=0.0)
+    translation: tuple[float, float, float]
+    create_rigid_body: bool = False
+    asset_rigid_body_path: str | None = None
+
+
 class EpisodeSpec(BaseModel):
     """Complete, reproducible description of a single episode."""
 
@@ -38,7 +52,9 @@ class EpisodeSpec(BaseModel):
     seed: int
     template_path: str
     backend: str
+    object_mode: ObjectMode
     duration_seconds: float = Field(gt=0.0)
     physics_dt: float = Field(gt=0.0)
     render_fps: int = Field(gt=0)
     objects: list[ObjectSpec]
+    replacements: list[AssetReplacementSpec] = Field(default_factory=list)

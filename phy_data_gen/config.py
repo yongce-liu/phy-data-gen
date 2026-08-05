@@ -8,8 +8,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 import yaml
+
+ObjectMode = Literal["generated_objects", "template_dynamics", "replace_assets"]
 
 
 @dataclass(frozen=True)
@@ -21,6 +24,7 @@ class SceneConfig:
     """
 
     name: str
+    object_mode: ObjectMode
     world_prim: str
     physics_scene_prim: str
     ground_prim: str
@@ -55,6 +59,7 @@ class RunConfig:
     scene: SceneConfig
     simulation: SimulationConfig
     render: RenderConfig
+    template_seed: int | None = None
 
 
 def load_config(path: Path) -> RunConfig:
@@ -64,8 +69,16 @@ def load_config(path: Path) -> RunConfig:
         raw = yaml.safe_load(file)
 
     scene_raw = raw["scene"]
+    object_mode = str(scene_raw["object_mode"])
+    if object_mode not in {
+        "generated_objects",
+        "template_dynamics",
+        "replace_assets",
+    }:
+        raise ValueError(f"Unsupported scene.object_mode: {object_mode}")
     scene = SceneConfig(
         name=str(scene_raw["name"]),
+        object_mode=object_mode,
         world_prim=str(scene_raw["world_prim"]),
         physics_scene_prim=str(scene_raw["physics_scene_prim"]),
         ground_prim=str(scene_raw["ground_prim"]),
@@ -84,4 +97,9 @@ def load_config(path: Path) -> RunConfig:
         scene=scene,
         simulation=SimulationConfig(**raw["simulation"]),
         render=RenderConfig(**raw["render"]),
+        template_seed=(
+            int(raw["template_seed"])
+            if raw.get("template_seed") is not None
+            else None
+        ),
     )

@@ -27,6 +27,7 @@ class SimulationResult:
     states: StateRecorder
     num_physics_steps: int
     captured_frames: int = 0
+    object_ids: list[str] = field(default_factory=list)
     object_paths: list[str] = field(default_factory=list)
     camera_metadata: dict[str, dict] = field(default_factory=dict)
     rgb_paths: dict[str, Path] = field(default_factory=dict)
@@ -45,7 +46,10 @@ def compute_step_counts(
     return num_physics_steps, capture_every
 
 
-def _find_rigid_body_paths(stage, episode_spec: EpisodeSpec) -> dict[str, str]:
+def _find_generated_rigid_body_paths(
+    stage,
+    episode_spec: EpisodeSpec,
+) -> dict[str, str]:
     """Resolve the single rigid-body prim below each generated object."""
 
     from pxr import Usd, UsdPhysics
@@ -70,6 +74,88 @@ def _find_rigid_body_paths(stage, episode_spec: EpisodeSpec) -> dict[str, str]:
             )
         paths[object_spec.object_id] = str(rigid_prims[0].GetPath())
     return paths
+
+
+def _find_template_rigid_body_paths(stage, world_prim_path: str) -> dict[str, str]:
+    """Discover every rigid body authored below the template world prim."""
+
+    from pxr import Usd, UsdPhysics
+
+    world_prim = stage.GetPrimAtPath(world_prim_path)
+    if not world_prim or not world_prim.IsValid():
+        raise RuntimeError(f"World prim not found: {world_prim_path}")
+
+    rigid_prims = sorted(
+        (
+            prim
+            for prim in Usd.PrimRange(world_prim)
+            if prim.HasAPI(UsdPhysics.RigidBodyAPI)
+        ),
+        key=lambda prim: str(prim.GetPath()),
+    )
+    if not rigid_prims:
+        raise RuntimeError(f"No template rigid bodies found below: {world_prim_path}")
+
+    name_counts: dict[str, int] = {}
+    for prim in rigid_prims:
+        name = prim.GetName()
+        name_counts[name] = name_counts.get(name, 0) + 1
+
+    paths: dict[str, str] = {}
+    for prim in rigid_prims:
+        prim_path = str(prim.GetPath())
+        name = prim.GetName()
+        if name_counts[name] == 1:
+            object_id = name
+        else:
+            object_id = prim_path.removeprefix(f"{world_prim_path}/").replace("/", "__")
+        paths[object_id] = prim_path
+    return paths
+
+
+def _find_replacement_rigid_body_paths(
+    stage,
+    episode_spec: EpisodeSpec,
+) -> dict[str, str]:
+    """Resolve the preserved template rigid bodies used for replacements."""
+
+    from pxr import Usd, UsdPhysics
+
+    paths = {}
+    for replacement in episode_spec.replacements:
+        target = stage.GetPrimAtPath(replacement.target_prim_path)
+        if not target or not target.IsValid():
+            raise RuntimeError(
+                f"Replacement target not found: {replacement.target_prim_path}"
+            )
+        rigid_prims = [
+            prim
+            for prim in Usd.PrimRange(target)
+            if prim.HasAPI(UsdPhysics.RigidBodyAPI)
+        ]
+        if len(rigid_prims) != 1:
+            matched = ", ".join(str(prim.GetPath()) for prim in rigid_prims)
+            raise RuntimeError(
+                f"Expected one replacement rigid body below "
+                f"{replacement.target_prim_path}, found {len(rigid_prims)}: "
+                f"{matched or 'none'}"
+            )
+        paths[replacement.object_id] = str(rigid_prims[0].GetPath())
+    return paths
+
+
+def _find_rigid_body_paths(
+    stage,
+    episode_spec: EpisodeSpec,
+    world_prim_path: str,
+) -> dict[str, str]:
+    if episode_spec.object_mode == "generated_objects":
+        return _find_generated_rigid_body_paths(stage, episode_spec)
+    if episode_spec.object_mode == "template_dynamics":
+        return _find_template_rigid_body_paths(stage, world_prim_path)
+    if episode_spec.object_mode == "replace_assets":
+        return _find_replacement_rigid_body_paths(stage, episode_spec)
+    raise ValueError(f"Unsupported object mode: {episode_spec.object_mode}")
 
 
 def _create_rigid_body_views(sim, rigid_body_paths: dict[str, str]):
@@ -131,6 +217,7 @@ def run_simulation(
     simulation_app,
     output_root: Path,
     cameras: dict[str, str],
+    world_prim_path: str,
     render_width: int,
     render_height: int,
     depth_scale_meters: float,
@@ -161,7 +248,11 @@ def run_simulation(
     )
 
     stage = context.get_stage()
-    rigid_body_paths = _find_rigid_body_paths(stage, episode_spec)
+    rigid_body_paths = _find_rigid_body_paths(
+        stage,
+        episode_spec,
+        world_prim_path,
+    )
 
     frame_recorder = None
     if capture_frames:
@@ -184,6 +275,7 @@ def run_simulation(
     result = SimulationResult(
         states=recorder,
         num_physics_steps=num_physics_steps,
+        object_ids=list(rigid_body_paths),
         object_paths=list(rigid_body_paths.values()),
     )
 

@@ -18,7 +18,12 @@ from pathlib import Path
 import tyro
 
 from phy_data_gen.config import RunConfig, load_config
-from phy_data_gen.schemas import EpisodeSpec, ObjectSpec, PhysicsMaterialSpec
+from phy_data_gen.schemas import (
+    AssetReplacementSpec,
+    EpisodeSpec,
+    ObjectSpec,
+    PhysicsMaterialSpec,
+)
 
 # Fixed grid slots (x, y, z) above the template centre, in metres.
 _GRID_SLOTS: tuple[tuple[float, float, float], ...] = (
@@ -58,7 +63,10 @@ def select_template_path(config: RunConfig) -> Path:
         raise FileNotFoundError(
             f"No USD scene templates found under: {config.template_root}"
         )
-    scene_rng = random.Random(config.seed)
+    scene_seed = (
+        config.template_seed if config.template_seed is not None else config.seed
+    )
+    scene_rng = random.Random(scene_seed)
     return scene_rng.choice(templates)
 
 
@@ -91,6 +99,194 @@ def _sample_material(rng: random.Random) -> PhysicsMaterialSpec:
     )
 
 
+def _replacement_object_id(prim_path: str, world_prim_path: str) -> str:
+    relative = prim_path.removeprefix(f"{world_prim_path}/")
+    return relative.replace("/", "__")
+
+
+def _replacement_targets(
+    template_path: Path,
+    config: RunConfig,
+) -> list[tuple[str, float, bool]]:
+    """Return target paths, local dimensions, and missing-body flags."""
+
+    # Importing Usd registers the USDA file-format plugin used by Sdf.
+    from pxr import Sdf, Usd  # noqa: F401
+
+    layer = Sdf.Layer.FindOrOpen(str(template_path.resolve()))
+    if layer is None:
+        raise RuntimeError(f"Failed to open template: {template_path}")
+
+    world = layer.GetPrimAtPath(config.scene.world_prim)
+    if world is None:
+        raise RuntimeError(f"World prim not found: {config.scene.world_prim}")
+
+    roots = []
+    if config.scene.dynamic_prims:
+        for prim_path in config.scene.dynamic_prims:
+            prim = layer.GetPrimAtPath(prim_path)
+            if prim is None:
+                raise RuntimeError(f"Replacement prim not found: {prim_path}")
+            roots.append(prim)
+    else:
+        roots.append(world)
+
+    def walk(prim_spec):
+        yield prim_spec
+        for child in prim_spec.nameChildren:
+            yield from walk(child)
+
+    def has_rigid_body_api(prim_spec) -> bool:
+        if not prim_spec.HasInfo("apiSchemas"):
+            return False
+        schemas = prim_spec.GetInfo("apiSchemas").GetAddedOrExplicitItems()
+        return "PhysicsRigidBodyAPI" in {str(schema) for schema in schemas}
+
+    def primitive_dimension(prim_spec) -> float:
+        dimensions = []
+        for item in walk(prim_spec):
+            properties = {prop.name: prop for prop in item.properties}
+            if item.typeName == "Sphere":
+                radius = properties.get("radius")
+                dimensions.append(2.0 * float(radius.default if radius else 1.0))
+            elif item.typeName == "Cube":
+                size = properties.get("size")
+                dimensions.append(float(size.default if size else 2.0))
+            elif item.typeName == "Mesh":
+                extent = properties.get("extent")
+                if extent and extent.default and len(extent.default) == 2:
+                    low, high = extent.default
+                    dimensions.append(max(float(high[i] - low[i]) for i in range(3)))
+        return max(dimensions, default=1.0)
+
+    targets_by_path = {}
+    if config.scene.dynamic_prims:
+        for root in roots:
+            matches = [prim for prim in walk(root) if has_rigid_body_api(prim)]
+            if len(matches) > 1:
+                paths = ", ".join(str(prim.path) for prim in matches)
+                raise RuntimeError(
+                    f"Expected at most one rigid body below {root.path}, found "
+                    f"{len(matches)}: {paths}"
+                )
+            target = matches[0] if matches else root
+            targets_by_path[str(target.path)] = (target, not matches)
+    else:
+        for child in world.nameChildren:
+            matches = [prim for prim in walk(child) if has_rigid_body_api(prim)]
+            seed_prefix = child.name.partition("_")[0]
+            is_template_prop = child.name.startswith("Prop_") or (
+                seed_prefix.startswith("S") and seed_prefix[1:].isdigit()
+            )
+            if matches:
+                for target in matches:
+                    targets_by_path[str(target.path)] = (target, False)
+            elif is_template_prop:
+                # Some Cosmos props author their rigid-body API inside an
+                # unavailable reference. Replace the outer slot and restore
+                # a rigid body locally instead of resolving that reference.
+                targets_by_path[str(child.path)] = (child, True)
+
+    if not targets_by_path:
+        raise RuntimeError(
+            f"No replacement targets found below: {config.scene.world_prim}"
+        )
+
+    targets = []
+    for prim_path, (prim, create_rigid_body) in sorted(targets_by_path.items()):
+        targets.append((prim_path, primitive_dimension(prim), create_rigid_body))
+    return targets
+
+
+def _asset_info(
+    asset_path: Path,
+) -> tuple[tuple[float, float, float], str | None]:
+    """Return bbox center and the relative rigid-body path for a local asset."""
+
+    from pxr import Usd, UsdGeom, UsdPhysics
+
+    stage = Usd.Stage.Open(str(asset_path))
+    if stage is None:
+        raise RuntimeError(f"Failed to open local asset: {asset_path}")
+    root = stage.GetDefaultPrim()
+    if not root or not root.IsValid():
+        raise RuntimeError(f"Local asset has no default prim: {asset_path}")
+    cache = UsdGeom.BBoxCache(
+        Usd.TimeCode.Default(),
+        [UsdGeom.Tokens.default_],
+        useExtentsHint=True,
+    )
+    box = cache.ComputeWorldBound(root).ComputeAlignedBox()
+    center = box.GetMin() + box.GetSize() * 0.5
+    rigid_prims = [
+        prim
+        for prim in Usd.PrimRange(root)
+        if prim.HasAPI(UsdPhysics.RigidBodyAPI)
+    ]
+    if len(rigid_prims) > 1:
+        paths = ", ".join(str(prim.GetPath()) for prim in rigid_prims)
+        raise RuntimeError(
+            f"Replacement asset contains multiple rigid bodies: {asset_path}: {paths}"
+        )
+    relative_rigid_path = None
+    if rigid_prims:
+        root_path = str(root.GetPath())
+        relative_rigid_path = str(rigid_prims[0].GetPath()).removeprefix(root_path)
+    return (
+        (float(center[0]), float(center[1]), float(center[2])),
+        relative_rigid_path,
+    )
+
+
+def _sample_replacements(
+    config: RunConfig,
+    template_path: Path,
+    rng: random.Random,
+) -> list[AssetReplacementSpec]:
+    registry = load_registry(config.registry_path)
+    if not registry:
+        raise RuntimeError(f"Asset registry is empty or missing: {config.registry_path}")
+
+    targets = _replacement_targets(template_path, config)
+    if len(targets) <= len(registry):
+        assets = rng.sample(registry, len(targets))
+    else:
+        assets = [rng.choice(registry) for _ in targets]
+
+    replacements = []
+    for (target_path, target_dimension, create_rigid_body), asset in zip(
+        targets,
+        assets,
+        strict=True,
+    ):
+        asset_path = Path(str(asset["usd_path"]))
+        if not asset_path.is_file():
+            raise FileNotFoundError(
+                f"Registry asset is not available locally: {asset_path}. "
+                "Rebuild the registry after downloading assets; generation never downloads."
+            )
+        asset_dimension = float(asset["max_dimension"])
+        if asset_dimension <= 0.0:
+            raise ValueError(f"Asset has invalid max_dimension: {asset_path}")
+        scale = target_dimension / asset_dimension
+        center, asset_rigid_body_path = _asset_info(asset_path)
+        replacements.append(
+            AssetReplacementSpec(
+                object_id=_replacement_object_id(
+                    target_path,
+                    config.scene.world_prim,
+                ),
+                target_prim_path=target_path,
+                asset_path=str(asset_path.resolve()),
+                scale=scale,
+                translation=tuple(-value * scale for value in center),
+                create_rigid_body=create_rigid_body,
+                asset_rigid_body_path=asset_rigid_body_path,
+            )
+        )
+    return replacements
+
+
 def create_episode_spec(
     config: RunConfig,
     episode_id: str = "episode_000000",
@@ -98,48 +294,54 @@ def create_episode_spec(
     """Sample an :class:`EpisodeSpec` deterministically from ``config``."""
 
     rng = random.Random(config.seed)
-    registry = load_registry(config.registry_path)
     selected_template = select_template_path(config)
 
-    num_objects = min(config.num_objects, len(_GRID_SLOTS))
     objects: list[ObjectSpec] = []
+    replacements: list[AssetReplacementSpec] = []
+    if config.scene.object_mode == "generated_objects":
+        registry = load_registry(config.registry_path)
+        num_objects = min(config.num_objects, len(_GRID_SLOTS))
 
-    for index in range(num_objects):
-        if registry:
-            asset = rng.choice(registry)
-            asset_path = str(asset["usd_path"])
-        else:
-            # Bootstrap fallback: no assets scanned yet. Reference a
-            # placeholder path so the spec is still well-formed and the
-            # downstream scene builder can surface a clear error.
-            asset_path = str(
-                (config.asset_root / f"__missing_asset_{index}.usd").resolve()
+        for index in range(num_objects):
+            if registry:
+                asset = rng.choice(registry)
+                asset_path = str(asset["usd_path"])
+            else:
+                # Bootstrap fallback: no assets scanned yet. Reference a
+                # placeholder path so the spec is still well-formed and the
+                # downstream scene builder can surface a clear error.
+                asset_path = str(
+                    (config.asset_root / f"__missing_asset_{index}.usd").resolve()
+                )
+
+            position = _GRID_SLOTS[index]
+            orientation = _sample_orientation(rng)
+
+            objects.append(
+                ObjectSpec(
+                    object_id=f"object_{index}",
+                    asset_path=asset_path,
+                    position=position,
+                    orientation_xyzw=orientation,
+                    scale=rng.uniform(0.8, 1.2),
+                    mass=rng.uniform(0.05, 0.5),
+                    material=_sample_material(rng),
+                )
             )
-
-        position = _GRID_SLOTS[index]
-        orientation = _sample_orientation(rng)
-
-        objects.append(
-            ObjectSpec(
-                object_id=f"object_{index}",
-                asset_path=asset_path,
-                position=position,
-                orientation_xyzw=orientation,
-                scale=rng.uniform(0.8, 1.2),
-                mass=rng.uniform(0.05, 0.5),
-                material=_sample_material(rng),
-            )
-        )
+    elif config.scene.object_mode == "replace_assets":
+        replacements = _sample_replacements(config, selected_template, rng)
 
     return EpisodeSpec(
         episode_id=episode_id,
         seed=config.seed,
         template_path=str(selected_template.resolve()),
         backend=config.backend,
+        object_mode=config.scene.object_mode,
         duration_seconds=config.simulation.duration_seconds,
         physics_dt=config.simulation.physics_dt,
         render_fps=config.simulation.render_fps,
         objects=objects,
+        replacements=replacements,
     )
 
 
@@ -165,7 +367,8 @@ def main() -> None:
     config = load_config(options.config)
     spec = create_episode_spec(config, episode_id=options.episode_id)
     save_episode_spec(spec, options.output)
-    print(f"Wrote EpisodeSpec with {len(spec.objects)} object(s) to {options.output}")
+    object_count = len(spec.objects) + len(spec.replacements)
+    print(f"Wrote EpisodeSpec with {object_count} object(s) to {options.output}")
 
 
 if __name__ == "__main__":

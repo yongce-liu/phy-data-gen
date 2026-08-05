@@ -84,7 +84,8 @@ def _run_plan(command: PlanCommand) -> None:
         config.output_root / "scene" / run_id / "episode_spec.json"
     )
     save_episode_spec(spec, output)
-    print(f"Wrote EpisodeSpec with {len(spec.objects)} object(s) to {output}")
+    object_count = len(spec.objects) + len(spec.replacements)
+    print(f"Wrote EpisodeSpec with {object_count} object(s) to {output}")
 
 
 def _run_inspect_template(command: InspectTemplateCommand) -> None:
@@ -154,6 +155,7 @@ def _generate_one(config, run_id: str, capture_frames: bool, simulation_app) -> 
             simulation_app=simulation_app,
             output_root=config.output_root,
             cameras=config.scene.cameras,
+            world_prim_path=config.scene.world_prim,
             render_width=config.render.width,
             render_height=config.render.height,
             depth_scale_meters=config.render.depth_scale_meters,
@@ -175,6 +177,7 @@ def _generate_one(config, run_id: str, capture_frames: bool, simulation_app) -> 
         save_physics_annotations(
             recorder=result.states,
             episode_spec=spec,
+            object_ids=result.object_ids,
             object_paths=result.object_paths,
             camera_names=list(config.scene.cameras),
             output_root=config.output_root,
@@ -183,7 +186,10 @@ def _generate_one(config, run_id: str, capture_frames: bool, simulation_app) -> 
 
         from phy_data_gen.validation import save_validation, validate_episode
 
-        summary = validate_episode(result.states.records)
+        summary = validate_episode(
+            result.states.records,
+            require_fall=spec.object_mode == "generated_objects",
+        )
         save_validation(summary, physics_dir / "validation.json")
         print(f"Validation passed={summary.get('passed')}")
         if capture_frames:

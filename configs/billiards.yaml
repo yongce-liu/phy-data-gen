@@ -1,0 +1,35 @@
+template_root: data/templates/cosmos3/billiards
+asset_root: data/assets/molmospaces
+registry_path: data/assets/registry.json
+output_root: outputs/billiards
+
+backend: physx
+seed: 42
+template_seed: 42
+num_objects: 0
+
+scene:
+  name: billiards
+  object_mode: replace_assets
+  world_prim: /World
+  physics_scene_prim: /PhysicsScene
+  ground_prim: /World/TableSurface
+
+  cameras:
+    BehindCue: /World/Camera_BehindCue
+    ImpactZone: /World/Camera_ImpactZone
+    TopDown: /World/Camera_TopDown
+    Corner: /World/Camera_Corner
+
+  dynamic_prims: []
+
+simulation:
+  physics_dt: 0.0020833333333333333
+  render_fps: 30
+  duration_seconds: 5.0
+
+render:
+  width: 1920
+  height: 1080
+  depth_scale_meters: 0.001
+  rgb_encoder: h264_nvenc

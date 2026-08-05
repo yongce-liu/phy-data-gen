@@ -100,6 +100,7 @@ def save_camera_metadata(
 def save_physics_annotations(
     recorder: StateRecorder,
     episode_spec: EpisodeSpec,
+    object_ids: list[str],
     object_paths: list[str],
     camera_names: list[str],
     output_root: Path,
@@ -109,7 +110,6 @@ def save_physics_annotations(
 
     import numpy as np
 
-    object_ids = [item.object_id for item in episode_spec.objects]
     object_index = {object_id: index for index, object_id in enumerate(object_ids)}
     frame_count = max((record["frame"] for record in recorder.records), default=-1) + 1
     object_count = len(object_ids)
@@ -167,6 +167,7 @@ def save_physics_annotations(
             output_dir / f"{camera_name}_static.json",
             camera_name,
             episode_spec,
+            object_ids,
             object_paths,
             colors,
             frame_count,
@@ -192,27 +193,50 @@ def _save_static_metadata(
     output_path: Path,
     camera_name: str,
     episode_spec: EpisodeSpec,
+    object_ids: list[str],
     object_paths: list[str],
     colors,
     frame_count: int,
 ) -> None:
     objects = []
-    for index, (spec, prim_path) in enumerate(
-        zip(episode_spec.objects, object_paths, strict=True)
+    generated_specs = {spec.object_id: spec for spec in episode_spec.objects}
+    replacement_specs = {
+        spec.object_id: spec for spec in episode_spec.replacements
+    }
+    for index, (object_id, prim_path) in enumerate(
+        zip(object_ids, object_paths, strict=True)
     ):
+        spec = generated_specs.get(object_id)
+        replacement = replacement_specs.get(object_id)
+        if replacement is not None:
+            properties = {
+                "source": "replacement",
+                "template_path": episode_spec.template_path,
+                "asset_path": replacement.asset_path,
+                "scale": replacement.scale,
+                "target_prim_path": replacement.target_prim_path,
+            }
+        elif spec is None:
+            properties = {
+                "source": "template",
+                "template_path": episode_spec.template_path,
+            }
+        else:
+            properties = {
+                "source": "generated",
+                "asset_path": spec.asset_path,
+                "mass": spec.mass,
+                "scale": spec.scale,
+                "static_friction": spec.material.static_friction,
+                "dynamic_friction": spec.material.dynamic_friction,
+                "restitution": spec.material.restitution,
+            }
         objects.append(
             {
-                "object_id": spec.object_id,
+                "object_id": object_id,
                 "prim_path": prim_path,
                 "segmentation_color": colors[index].tolist(),
-                "properties": {
-                    "asset_path": spec.asset_path,
-                    "mass": spec.mass,
-                    "scale": spec.scale,
-                    "static_friction": spec.material.static_friction,
-                    "dynamic_friction": spec.material.dynamic_friction,
-                    "restitution": spec.material.restitution,
-                },
+                "properties": properties,
             }
         )
     payload = {

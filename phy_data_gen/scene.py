@@ -20,7 +20,7 @@ import tyro
 
 from phy_data_gen.config import SceneConfig, load_config
 from phy_data_gen.episode import create_episode_spec
-from phy_data_gen.schemas import EpisodeSpec, ObjectSpec
+from phy_data_gen.schemas import AssetReplacementSpec, EpisodeSpec, ObjectSpec
 
 _GENERATED_ROOT = "/World/GeneratedObjects"
 
@@ -152,6 +152,220 @@ def _add_object(stage, object_spec: ObjectSpec) -> str:
     return prim_path
 
 
+def _replace_asset(
+    stage,
+    replacement: AssetReplacementSpec,
+    scene: SceneConfig,
+) -> str:
+    """Replace geometry below a template rigid body while preserving its state."""
+
+    from pxr import Gf, Sdf, Usd, UsdGeom, UsdPhysics, UsdShade
+
+    target = stage.GetPrimAtPath(replacement.target_prim_path)
+    if not target or not target.IsValid():
+        raise RuntimeError(
+            f"Replacement target not found: {replacement.target_prim_path}"
+        )
+    had_template_rigid_body = target.HasAPI(UsdPhysics.RigidBodyAPI)
+    if not replacement.create_rigid_body and not had_template_rigid_body:
+        raise RuntimeError(
+            f"Replacement target is not a rigid body: {replacement.target_prim_path}"
+        )
+
+    template_rigid_api = UsdPhysics.RigidBodyAPI(target)
+    linear_velocity = (
+        template_rigid_api.GetVelocityAttr().Get()
+        if had_template_rigid_body
+        else None
+    )
+    angular_velocity = (
+        template_rigid_api.GetAngularVelocityAttr().Get()
+        if had_template_rigid_body
+        else None
+    )
+
+    asset_path = Path(replacement.asset_path)
+    if not asset_path.is_file():
+        raise FileNotFoundError(
+            f"Replacement asset is not available locally: {asset_path}"
+        )
+
+    for child in target.GetChildren():
+        override = stage.OverridePrim(str(child.GetPath()))
+        override.GetReferences().SetReferences([])
+        override.SetActive(False)
+
+    container_path = f"{replacement.target_prim_path}/ReplacementAsset"
+    container = stage.DefinePrim(container_path, "Xform")
+    xform = UsdGeom.Xformable(container)
+    precision = UsdGeom.XformOp.PrecisionDouble
+    xform.AddTranslateOp(precision=precision).Set(Gf.Vec3d(*replacement.translation))
+    xform.AddScaleOp(precision=precision).Set(
+        Gf.Vec3d(replacement.scale, replacement.scale, replacement.scale)
+    )
+
+    asset_prim = stage.DefinePrim(f"{container_path}/Asset", "Xform")
+    asset_prim.GetReferences().AddReference(str(asset_path.resolve()))
+
+    if replacement.asset_rigid_body_path:
+        rigid_path = f"{asset_prim.GetPath()}{replacement.asset_rigid_body_path}"
+        rigid_prim = stage.GetPrimAtPath(rigid_path)
+        if not rigid_prim or not rigid_prim.IsValid():
+            raise RuntimeError(f"Referenced asset rigid body not found: {rigid_path}")
+    else:
+        rigid_prim = asset_prim
+        UsdPhysics.RigidBodyAPI.Apply(rigid_prim)
+
+    if had_template_rigid_body:
+        target.RemoveAPI(UsdPhysics.RigidBodyAPI)
+    if target.HasAPI(UsdPhysics.CollisionAPI):
+        target.RemoveAPI(UsdPhysics.CollisionAPI)
+    if target.HasAPI(UsdPhysics.MeshCollisionAPI):
+        target.RemoveAPI(UsdPhysics.MeshCollisionAPI)
+    if target.HasAPI(UsdPhysics.MassAPI):
+        target.RemoveAPI(UsdPhysics.MassAPI)
+    UsdShade.MaterialBindingAPI(target).UnbindAllBindings()
+
+    replacement_rigid_api = UsdPhysics.RigidBodyAPI.Apply(rigid_prim)
+    if linear_velocity is not None:
+        replacement_rigid_api.CreateVelocityAttr().Set(linear_velocity)
+    if angular_velocity is not None:
+        replacement_rigid_api.CreateAngularVelocityAttr().Set(angular_velocity)
+
+    collision_prims = [
+        prim
+        for prim in Usd.PrimRange(asset_prim)
+        if prim.HasAPI(UsdPhysics.CollisionAPI)
+    ]
+    if not collision_prims:
+        raise RuntimeError(f"Replacement asset has no collision prims: {asset_path}")
+    for prim in collision_prims:
+        UsdPhysics.CollisionAPI(prim).CreateSimulationOwnerRel().SetTargets(
+            [Sdf.Path(scene.physics_scene_prim)]
+        )
+
+    remaining_rigid_prims = [
+        prim
+        for prim in Usd.PrimRange(target)
+        if prim.HasAPI(UsdPhysics.RigidBodyAPI)
+    ]
+    if remaining_rigid_prims != [rigid_prim]:
+        paths = ", ".join(str(prim.GetPath()) for prim in remaining_rigid_prims)
+        raise RuntimeError(
+            f"Expected one replacement rigid body below "
+            f"{replacement.target_prim_path}, found: {paths or 'none'}"
+        )
+    return str(rigid_prim.GetPath())
+
+
+def _repair_missing_template_primitives(stage, scene: SceneConfig) -> list[str]:
+    """Replace unresolved Cosmos sphere/prism references with USD primitives."""
+
+    from pxr import Sdf, Usd, UsdGeom, UsdPhysics
+
+    world_prim = stage.GetPrimAtPath(scene.world_prim)
+    if not world_prim or not world_prim.IsValid():
+        raise RuntimeError(f"World prim not found: {scene.world_prim}")
+
+    repairs: list[tuple[str, str]] = []
+    for prim in Usd.PrimRange(world_prim):
+        if prim.GetName() not in {"sphere", "prism"}:
+            continue
+        has_geometry = any(
+            descendant.IsA(UsdGeom.Gprim) for descendant in Usd.PrimRange(prim)
+        )
+        if not has_geometry:
+            repairs.append((str(prim.GetPath()), prim.GetName()))
+
+    repairs.sort()
+    repaired_paths: list[str] = []
+    for prim_path, shape_name in repairs:
+        prim = stage.GetPrimAtPath(prim_path)
+        prim.GetReferences().SetReferences([])
+        if shape_name == "sphere":
+            shape = UsdGeom.Sphere.Define(stage, prim_path)
+            shape.CreateRadiusAttr(0.5)
+        else:
+            shape = UsdGeom.Cube.Define(stage, prim_path)
+            shape.CreateSizeAttr(1.0)
+        collision_api = UsdPhysics.CollisionAPI.Apply(shape.GetPrim())
+        collision_api.CreateSimulationOwnerRel().SetTargets(
+            [Sdf.Path(scene.physics_scene_prim)]
+        )
+        repaired_paths.append(prim_path)
+    return repaired_paths
+
+
+def _prepare_replacement_layer(
+    root_layer,
+    template_path: Path,
+    episode_spec,
+    scene: SceneConfig,
+):
+    """Block original asset references before composing the replacement stage."""
+
+    # Importing Usd registers the USDA file-format plugin used by Sdf.
+    from pxr import Sdf, Usd  # noqa: F401
+
+    template_layer = Sdf.Layer.FindOrOpen(str(template_path.resolve()))
+    if template_layer is None:
+        raise RuntimeError(f"Failed to open template layer: {template_path}")
+
+    replacement_paths = {
+        replacement.target_prim_path for replacement in episode_spec.replacements
+    }
+    for target_path in sorted(replacement_paths):
+        target_spec = template_layer.GetPrimAtPath(target_path)
+        if target_spec is None:
+            raise RuntimeError(f"Replacement target not found: {target_path}")
+        for child in target_spec.nameChildren:
+            override = Sdf.CreatePrimInLayer(root_layer, child.path)
+            override.specifier = Sdf.SpecifierOver
+            override.SetInfo("references", Sdf.ReferenceListOp.CreateExplicit([]))
+            override.active = False
+
+    repaired_paths = []
+
+    def walk(prim_spec):
+        yield prim_spec
+        for child in prim_spec.nameChildren:
+            yield from walk(child)
+
+    world_spec = template_layer.GetPrimAtPath(scene.world_prim)
+    if world_spec is None:
+        return repaired_paths
+    for prim_spec in walk(world_spec):
+        prim_path = str(prim_spec.path)
+        if prim_spec.name not in {"sphere", "prism"}:
+            continue
+        if any(prim_path.startswith(f"{target}/") for target in replacement_paths):
+            continue
+        references = prim_spec.referenceList.GetAddedOrExplicitItems()
+        if not references:
+            continue
+        override = Sdf.CreatePrimInLayer(root_layer, prim_spec.path)
+        override.specifier = Sdf.SpecifierDef
+        override.SetInfo("references", Sdf.ReferenceListOp.CreateExplicit([]))
+        override.typeName = "Sphere" if prim_spec.name == "sphere" else "Cube"
+        repaired_paths.append(prim_path)
+    return repaired_paths
+
+
+def _finish_prepared_primitives(stage, scene: SceneConfig, prim_paths: list[str]) -> None:
+    from pxr import Sdf, UsdGeom, UsdPhysics
+
+    for prim_path in prim_paths:
+        prim = stage.GetPrimAtPath(prim_path)
+        if prim.GetName() == "sphere":
+            UsdGeom.Sphere(prim).CreateRadiusAttr(0.5)
+        else:
+            UsdGeom.Cube(prim).CreateSizeAttr(1.0)
+        collision_api = UsdPhysics.CollisionAPI.Apply(prim)
+        collision_api.CreateSimulationOwnerRel().SetTargets(
+            [Sdf.Path(scene.physics_scene_prim)]
+        )
+
+
 def build_scene(
     episode_spec: EpisodeSpec,
     scene: SceneConfig,
@@ -173,13 +387,41 @@ def build_scene(
     root_layer = Sdf.Layer.CreateNew(str(output_path))
     root_layer.subLayerPaths.append(str(template_path))
 
+    prepared_paths = []
+    if episode_spec.object_mode == "replace_assets":
+        prepared_paths = _prepare_replacement_layer(
+            root_layer,
+            template_path,
+            episode_spec,
+            scene,
+        )
+
     stage = Usd.Stage.Open(root_layer)
 
-    _disable_template_dynamics(stage, scene)
+    if prepared_paths:
+        _finish_prepared_primitives(stage, scene, prepared_paths)
 
-    stage.DefinePrim(_GENERATED_ROOT, "Xform")
-    for object_spec in episode_spec.objects:
-        _add_object(stage, object_spec)
+    if episode_spec.object_mode == "generated_objects":
+        _disable_template_dynamics(stage, scene)
+
+        stage.DefinePrim(_GENERATED_ROOT, "Xform")
+        for object_spec in episode_spec.objects:
+            _add_object(stage, object_spec)
+    elif episode_spec.object_mode == "replace_assets":
+        if prepared_paths:
+            print(
+                f"Repaired {len(prepared_paths)} unresolved template "
+                "sphere/prism reference(s) before replacement"
+            )
+        for replacement in episode_spec.replacements:
+            _replace_asset(stage, replacement, scene)
+    else:
+        repaired_paths = _repair_missing_template_primitives(stage, scene)
+        if repaired_paths:
+            print(
+                f"Repaired {len(repaired_paths)} unresolved template "
+                "sphere/prism reference(s)"
+            )
 
     root_layer.Save()
     return output_path

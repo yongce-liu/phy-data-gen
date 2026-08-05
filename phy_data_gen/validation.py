@@ -31,7 +31,7 @@ def _speed(velocity) -> float:
     return math.sqrt(sum(float(v) * float(v) for v in velocity))
 
 
-def validate_episode(records: list[dict]) -> dict:
+def validate_episode(records: list[dict], require_fall: bool = True) -> dict:
     """Validate per-frame state records and return a summary dict."""
 
     if not records:
@@ -82,7 +82,7 @@ def validate_episode(records: list[dict]) -> dict:
             break
 
     max_speed_ok = max_speed < _MAX_SPEED
-    passed = finite and moved and fell and max_speed_ok
+    passed = finite and moved and (fell or not require_fall) and max_speed_ok
 
     return {
         "finite": bool(finite),
