@@ -740,6 +740,34 @@ def _build_procedural_backdrop(stage, scene: SceneConfig) -> None:
             )
 
 
+def _add_invisible_ground(stage, scene: SceneConfig, height: float = -0.6) -> None:
+    """Author a large flat collider below the table with no visible surface.
+
+    The Cosmos billiards templates have a table but no floor: a ball that
+    rolls off the edge falls into the void (z → -hundreds of metres), which
+    breaks validation and pollutes the data.  This invisible box sits a
+    little under the table top so balls that roll off land on an (invisible)
+    floor instead of falling forever, without adding a visible slab over the
+    scene's own background.
+    """
+
+    from pxr import Gf, Sdf, UsdGeom, UsdPhysics
+
+    prim_path = f"{scene.world_prim}/InvisibleGround"
+    stage.DefinePrim(prim_path, "Xform")
+    geometry = UsdGeom.Cube.Define(stage, f"{prim_path}/Geometry")
+    geometry.CreateSizeAttr(1.0)
+    xform = UsdGeom.Xformable(geometry.GetPrim())
+    precision = UsdGeom.XformOp.PrecisionDouble
+    xform.AddTranslateOp(precision=precision).Set(Gf.Vec3d(0.0, 0.0, height - 0.05))
+    xform.AddScaleOp(precision=precision).Set(Gf.Vec3d(6.0, 6.0, 0.1))
+    collision_api = UsdPhysics.CollisionAPI.Apply(geometry.GetPrim())
+    collision_api.CreateSimulationOwnerRel().SetTargets(
+        [Sdf.Path(scene.physics_scene_prim)]
+    )
+    # No material binding → the cube renders nothing (invisible collider).
+
+
 def _define_episode_cameras(stage, episode_spec: EpisodeSpec) -> None:
     for camera in episode_spec.cameras.values():
         _define_camera(stage, camera)
@@ -815,6 +843,9 @@ def build_scene(
         # Procedural backdrop (tray, extra walls, ground) may be authored even
         # when a template supplies the base scene.
         _build_procedural_backdrop(stage, scene)
+        # The Cosmos templates have a table but no floor; add an invisible
+        # catch-all so balls that roll off the edge don't fall into the void.
+        _add_invisible_ground(stage, scene)
 
         stage.DefinePrim(_GENERATED_ROOT, "Xform")
         for object_spec in episode_spec.objects:
