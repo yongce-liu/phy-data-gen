@@ -23,8 +23,8 @@ import random
 from phy_data_gen.categories.common import (
     ball_spec,
     build_episode,
+    jittered_cameras,
     make_material,
-    standard_cameras,
 )
 from phy_data_gen.config import RunConfig
 from phy_data_gen.schemas import EpisodeSpec
@@ -98,37 +98,43 @@ def _sample_scenario(rng: random.Random, variant: str) -> dict:
 
 
 def _place_balls(scenario: dict, variant: str, rng: random.Random):
-    """Return (pos1, pos2, vel1, vel2, spin1) for the scenario."""
+    """Return (pos1, pos2, vel1, vel2, spin1) for the scenario.
+
+    The collision happens at the origin after a visible approach: ball_a
+    starts far away (0.5-1.2 m) and travels in, so the video shows the run-up
+    before contact. ball_b sits at (b, 0, r2) — the impact-parameter offset —
+    so the collision point is the origin.
+    """
 
     r1 = scenario["r1"]
     r2 = scenario["r2"]
     b = scenario["b"]
-    gap = scenario["gap"]
     speed = scenario["speed"]
     s1 = scenario["spin1"]
+    approach = rng.uniform(0.5, 1.2)  # visible run-up distance (m)
 
-    # Ball 1 travels along +Y toward ball 2; ball 2 sits at the origin, offset
-    # along +X by the impact parameter b.
+    # Ball 1 travels along +Y toward ball 2 at the origin (offset by b).
     pos2 = (b, 0.0, r2)
-    pos1 = (0.0, -gap, r1)
+    pos1 = (0.0, -approach, r1)
     vel1 = (0.0, speed, 0.0)
     vel2 = (0.0, 0.0, 0.0)
 
     if variant == "head_on_towards":
-        # Both balls moving head-on: ball 1 along +Y, ball 2 along -Y.
-        pos2 = (0.0, gap, r2)
+        # Both moving head-on, collide at the origin.
+        pos2 = (0.0, approach * 0.4, r2)
         vel2 = (0.0, -speed * 0.5, 0.0)
         vel1 = (0.0, speed, 0.0)
     elif variant == "rear_end":
         # Catch-up: ball 2 ahead moving slower, ball 1 behind moving faster.
-        pos2 = (b, 0.0, r2)
+        pos2 = (b, approach * 0.3, r2)
         vel2 = (0.0, speed * rng.uniform(0.2, 0.6), 0.0)
         vel1 = (0.0, speed, 0.0)
     elif variant == "both_moving":
-        # Offset both moving: travel along different axes, guaranteed collision.
-        pos1 = (-gap, -gap, r1)
-        vel1 = (speed, speed, 0.0)
-        pos2 = (0.0, 0.0, r2)
+        # Ball 1 moves along +X, ball 2 along -X, collide at the origin.
+        pos1 = (-approach, 0.0, r1)
+        pos2 = (approach * 0.3, 0.0, r2)
+        vel1 = (speed, 0.0, 0.0)
+        vel2 = (-speed * 0.5, 0.0, 0.0)
 
     return pos1, pos2, vel1, vel2, s1
 
@@ -145,6 +151,10 @@ def create_episode_spec(
     scenario = _sample_scenario(rng, variant)
     pos1, pos2, vel1, vel2, s1 = _place_balls(scenario, variant, rng)
 
+    # Randomize ball colours each episode for visual variety.
+    color_a = _random_color(rng)
+    color_b = _random_color(rng, exclude=color_a)
+
     balls = [
         ball_spec(
             "ball_a",
@@ -154,7 +164,7 @@ def create_episode_spec(
             make_material(scenario["restitution"]),
             velocity=vel1,
             angular_velocity=(0.0, 0.0, s1),
-            color=(0.9, 0.2, 0.2),
+            color=color_a,
         ),
         ball_spec(
             "ball_b",
@@ -163,7 +173,7 @@ def create_episode_spec(
             scenario["m2"],
             make_material(scenario["restitution"]),
             velocity=vel2,
-            color=(0.2, 0.3, 0.9),
+            color=color_b,
         ),
     ]
 
@@ -172,5 +182,22 @@ def create_episode_spec(
         episode_id,
         template_path,
         balls,
-        standard_cameras(_TABLE_CENTER),
+        jittered_cameras(_TABLE_CENTER, rng),
     )
+
+
+def _random_color(rng, exclude=None):
+    """Return a vivid, distinct RGB colour tuple."""
+
+    while True:
+        # Avoid muddy dark colours; bias to bright hues.
+        color = (
+            rng.uniform(0.2, 1.0),
+            rng.uniform(0.2, 1.0),
+            rng.uniform(0.2, 1.0),
+        )
+        if exclude is None:
+            return color
+        # Keep the two balls visually distinct.
+        if sum(abs(a - b) for a, b in zip(color, exclude)) > 0.8:
+            return color

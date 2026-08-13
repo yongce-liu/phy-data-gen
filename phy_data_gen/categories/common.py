@@ -144,6 +144,41 @@ def standard_cameras(center: tuple[float, float, float] = (0.0, 0.0, 0.0)) -> di
     }
 
 
+def jittered_cameras(
+    center: tuple[float, float, float],
+    rng,
+    names: tuple[str, ...] = ("Side", "Front", "Top", "Action"),
+    distance: float = 2.5,
+    height: float = 0.8,
+) -> dict[str, CameraSpec]:
+    """A 4-camera ring with randomized per-episode position/zoom.
+
+    Each camera keeps its general direction (side/front/top/action) but its
+    distance, height and focal length jitter per episode, so the action is
+    framed differently every time without losing the shot.
+    """
+
+    specs = {}
+    base_angles = {"Side": 90.0, "Front": 0.0, "Top": None, "Action": 45.0}
+    for name in names:
+        if name == "Top":
+            d = rng.uniform(distance * 0.9, distance * 1.4)
+            pos = (center[0], center[1], height * 3.0 + rng.uniform(-0.3, 0.3))
+            focal = rng.uniform(20.0, 35.0)
+        else:
+            angle = math.radians(base_angles.get(name, 45.0))
+            d = rng.uniform(distance * 0.8, distance * 1.3)
+            h = height + rng.uniform(-0.2, 0.2)
+            pos = (
+                center[0] + d * math.cos(angle),
+                center[1] + d * math.sin(angle),
+                h,
+            )
+            focal = rng.uniform(24.0, 40.0)
+        specs[name] = camera_spec(name, pos, center, focal_length=focal)
+    return specs
+
+
 def standard_config_cameras(names: tuple[str, ...] = ("Side", "Front", "Top", "Action")) -> dict[str, str]:
     return {name: f"/World/Camera_{name}" for name in names}
 
