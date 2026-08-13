@@ -37,6 +37,9 @@ class ObjectSpec(BaseModel):
     # ``radius`` is the sphere radius (m) for ``sphere`` objects, or the
     # half-extent along every axis for ``box`` objects.
     radius: float | None = None
+    # ``half_extents`` (box kind) overrides the uniform cube with a per-axis
+    # box. The cube geometry is scaled by 2*half_extents.
+    half_extents: tuple[float, float, float] | None = None
     color: tuple[float, float, float] = (0.6, 0.6, 0.6)
     # Initial body velocities, authored as physics:velocity /
     # physics:angularVelocity on the rigid-body prim (m/s, rad/s).
@@ -91,3 +94,6 @@ class EpisodeSpec(BaseModel):
     # ``runner`` selects the simulation backend path. Only "rigid" exists on
     # dev; category 08 supplies "deformable" in phy_data_gen/runners/.
     runner: Literal["rigid", "deformable"] = "rigid"
+    # Category-specific payload (e.g. deformable material params for the
+    # soft-ball runner). Ignored by the rigid path.
+    metadata: dict[str, object] = Field(default_factory=dict)
