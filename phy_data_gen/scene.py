@@ -749,6 +749,11 @@ def _add_invisible_ground(stage, scene: SceneConfig, height: float = -0.6) -> No
     little under the table top so balls that roll off land on an (invisible)
     floor instead of falling forever, without adding a visible slab over the
     scene's own background.
+
+    The slab is deliberately large (200×200 m) and 1 m thick: balls can
+    travel up to ~8 m/s × 5 s ≈ 40 m in an episode, so a small pad would
+    let them fall off the ground's own edge, and a thin slab can be tunnelled
+    through by a fast-falling ball in one physics step.
     """
 
     from pxr import Gf, Sdf, UsdGeom, UsdPhysics
@@ -759,8 +764,9 @@ def _add_invisible_ground(stage, scene: SceneConfig, height: float = -0.6) -> No
     geometry.CreateSizeAttr(1.0)
     xform = UsdGeom.Xformable(geometry.GetPrim())
     precision = UsdGeom.XformOp.PrecisionDouble
-    xform.AddTranslateOp(precision=precision).Set(Gf.Vec3d(0.0, 0.0, height - 0.05))
-    xform.AddScaleOp(precision=precision).Set(Gf.Vec3d(6.0, 6.0, 0.1))
+    # 1 m thick slab whose top sits at ``height``: translate by height - 0.5.
+    xform.AddTranslateOp(precision=precision).Set(Gf.Vec3d(0.0, 0.0, height - 0.5))
+    xform.AddScaleOp(precision=precision).Set(Gf.Vec3d(200.0, 200.0, 1.0))
     collision_api = UsdPhysics.CollisionAPI.Apply(geometry.GetPrim())
     collision_api.CreateSimulationOwnerRel().SetTargets(
         [Sdf.Path(scene.physics_scene_prim)]
