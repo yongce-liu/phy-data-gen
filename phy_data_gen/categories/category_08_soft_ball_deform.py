@@ -22,11 +22,20 @@ import random
 from phy_data_gen.categories.common import (
     ball_spec,
     build_episode,
+    camera_spec,
     make_material,
-    standard_cameras,
 )
 from phy_data_gen.config import RunConfig
-from phy_data_gen.schemas import EpisodeSpec, ObjectSpec
+from phy_data_gen.schemas import CameraSpec, EpisodeSpec, ObjectSpec
+
+
+def _cameras() -> dict[str, CameraSpec]:
+    """Side + Top cameras (matches the 2-camera 960x540 config)."""
+
+    return {
+        "Side": camera_spec("Side", (2.5, 0.0, 0.8), _TABLE_CENTER),
+        "Top": camera_spec("Top", (0.0, 0.0, 3.0), _TABLE_CENTER),
+    }
 
 _TABLE_CENTER = (0.0, 0.0, 0.0)
 _VARIANTS = [
@@ -128,7 +137,7 @@ def create_episode_spec(
         episode_id,
         template_path,
         objects,
-        standard_cameras(_TABLE_CENTER),
+        _cameras(),
         duration_seconds=3.0,
         physics_dt=1.0 / 120.0,
         runner="deformable",
