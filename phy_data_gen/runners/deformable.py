@@ -197,11 +197,17 @@ def run_simulation(
     capture_every = max(1, round(1.0 / (episode_spec.render_fps * episode_spec.physics_dt)))
 
     # Deformable bodies require GPU dynamics on the physics scene. The USD
-    # template already declares physxScene:enableGPUDynamics, but re-assert it
-    # here so a physics scene created/overridden by the runtime keeps it on.
+    # template already declares physxScene:enableGPUDynamics, but
+    # SimulationContext._initialize_physics_scene() deletes and recreates the
+    # physics scene, wiping it. Re-assert after the context rebuilds the scene
+    # and before reset() plays the timeline.
+    sim = SimulationContext(SimulationCfg(dt=episode_spec.physics_dt))
+
     from pxr import Sdf
 
-    ps_prim = stage.GetPrimAtPath("/PhysicsScene")
+    ps_prim = sim.stage.GetPrimAtPath("/PhysicsScene")
+    if not ps_prim.IsValid():
+        ps_prim = sim.stage.GetPrimAtPath("/World/PhysicsScene")
     if ps_prim.IsValid():
         ps_prim.CreateAttribute(
             "physxScene:enableGPUDynamics", Sdf.ValueTypeNames.Bool
@@ -209,8 +215,12 @@ def run_simulation(
         ps_prim.CreateAttribute(
             "physxScene:enableCCD", Sdf.ValueTypeNames.Bool
         ).Set(True)
-
-    sim = SimulationContext(SimulationCfg(dt=episode_spec.physics_dt))
+        ps_prim.CreateAttribute(
+            "physxScene:enableStabilization", Sdf.ValueTypeNames.Bool
+        ).Set(True)
+        ps_prim.CreateAttribute(
+            "physxScene:timeStepsPerSecond", Sdf.ValueTypeNames.UInt
+        ).Set(int(round(1.0 / episode_spec.physics_dt)))
 
     # Read the deformable mesh points directly from the USD stage each frame
     # instead of using isaacsim.core.experimental.prims.DeformablePrim, whose
