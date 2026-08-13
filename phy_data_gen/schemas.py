@@ -91,3 +91,6 @@ class EpisodeSpec(BaseModel):
     # ``runner`` selects the simulation backend path. Only "rigid" exists on
     # dev; category 08 supplies "deformable" in phy_data_gen/runners/.
     runner: Literal["rigid", "deformable"] = "rigid"
+    # Category-specific payload (e.g. deformable material params for the
+    # soft-ball runner). Ignored by the rigid path.
+    metadata: dict[str, object] = Field(default_factory=dict)

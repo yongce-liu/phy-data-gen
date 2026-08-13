@@ -13,9 +13,12 @@ def Xform "World"
 
     def Xform "Ground"
     {
-        def Cube "Geometry"
+        def Cube "Geometry" (
+            prepend apiSchemas = ["PhysicsCollisionAPI"]
+        )
         {
             float3[] extent = [(-0.5, -0.5, -0.5), (0.5, 0.5, 0.5)]
+            rel physics:simulationOwner = </PhysicsScene>
             float3[] xformOp:translate = (0, 0, -0.05)
             float3[] xformOp:scale = (4, 4, 0.1)
             uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]

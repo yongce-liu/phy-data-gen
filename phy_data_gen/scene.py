@@ -714,6 +714,9 @@ def build_scene(
 
     if episode_spec.object_mode in {"generated_objects", "procedural"}:
         _disable_template_dynamics(stage, scene)
+        # Procedural backdrop (tray, extra walls, ground) may be authored even
+        # when a template supplies the base scene.
+        _build_procedural_backdrop(stage, scene)
 
         stage.DefinePrim(_GENERATED_ROOT, "Xform")
         for object_spec in episode_spec.objects:
