@@ -20,6 +20,17 @@
 `object_mode: procedural` 停用模板内的球与母球刚体，插入两枚自研球（Sphere
 primitive + RigidBodyAPI + CCD + `physics:velocity`/`physics:angularVelocity`）。
 
+每个 episode 会**随机选取不同的 Cosmos billiards 模板**（`template_seed` 留空），
+从而获得不同的球台材质与背景球幕环境；两球颜色也逐条随机。相机经修复后
+始终正确对准球台中心（见下）。
+
+## 可见接近过程
+
+旧的采样随机给定初速，导致两球在 0.2 s 内就相撞，视频几乎没有"运动—接近"。
+现在改为：先采样目标接近时间 `approach_time ∈ [0.9, 1.8] s`，再由初始间距
+推导相对速度，保证碰撞前有 **约 1.3–2.0 s** 的可见运动阶段（30 fps 下
+40–60 帧）。碰撞后两球继续运动直到视频结束。
+
 ## 生成
 
 ```bash
@@ -38,8 +49,25 @@ uv run python scripts/generate_high_throughput.py \
 | 量 | 范围 |
 |---|---|
 | 半径 r1, r2 | 0.03–0.05 m |
-| 初速 v | 0.5–8 m/s |
+| 接近时间 approach_time | 0.9–1.8 s（≈1.3–2.0 s 可见接近） |
 | 碰撞偏心距 b | 0–0.95×(r1+r2) |
 | 恢复系数 e | {0, 0.3, 0.7, 1.0} |
 | 质量比 | {1, 2, 5, 10} |
 | 角速度 ω | ±50 rad/s（约半数据） |
+
+每个 episode 的 `episode_spec.metadata` 记录了 variant、restitution、质量比、
+碰撞偏心距、接近时间、自旋、初始位置/速度，便于复现与下游使用。
+
+## 已修复的问题
+
+- **相机指向错误**：`look_at` 曾用左手系基向量 + `ExtractRotation`，导致所有
+  9 个类别的相机都对准球幕环境而非球台。现改为右手系 + 标准 Shepperd
+  四元数并取共轭（pxr `xformOp:orient` 施加的是逆旋转）。
+- **球掉落出世界**：Cosmos 球台模板没有地板，滚出桌沿的球会掉到 z→-100 m。
+  已加入一个 200×200×1 m 的隐形地面碰撞体，球滚落后落在（隐形）地面上。
+- **无接近过程**：见上文「可见接近过程」。
+
+## 验证
+
+`validation.json` 现在要求：两球真实接触（`has_contact`）、接触发生在第 6 帧
+之后（`approach_ok`，保证有接近阶段）、有限值且最大速度 < 50 m/s。
