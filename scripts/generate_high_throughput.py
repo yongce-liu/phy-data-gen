@@ -351,7 +351,20 @@ def main() -> int:
 
             sim_ms = (t1 - t0) * 1000
             io_ms = (t2 - t1) * 1000
-            passed = summary.get("passed", False)
+            # For deformable episodes the runner wrote its own validation;
+            # read it back for the status line.
+            if spec.runner == "rigid":
+                passed = summary.get("passed", False)
+            else:
+                try:
+                    import json as _json
+
+                    v = _json.loads(
+                        (physics_dir / "validation.json").read_text(encoding="utf-8")
+                    )
+                    passed = bool(v.get("passed", False))
+                except Exception:
+                    passed = False
 
             print(
                 f"{tag} [{ep_seed}] "
