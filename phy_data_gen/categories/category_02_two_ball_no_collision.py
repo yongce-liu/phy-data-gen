@@ -69,33 +69,27 @@ def _place_balls(scenario: dict, variant: str, rng: random.Random):
         pos2 = (miss / 2.0, 0.5, r2)
         vel1 = (0.0, v, 0.0)
         vel2 = (0.0, v * rng.uniform(0.5, 1.2), 0.0)
-        delay2 = 0.0
     elif variant == "cross_pass":
         # Cross at the origin; ball1 along +Y, ball2 along +X, large miss.
         angle = rng.uniform(math.radians(30), math.radians(90))
         pos1 = (0.0, -0.6, r1)
-        pos2 = (-0.6, 0.0, r2)
-        vel1 = (0.0, v, 0.0)
         vel2 = (v * math.cos(angle), v * math.sin(angle), 0.0)
         # Ensure miss: offset trajectories by > sum_r in the cross direction.
         miss_offset = miss * 1.2
         pos2 = (-0.6, miss_offset, r2)
         vel2 = (v, 0.0, 0.0)
-        delay2 = 0.0
     elif variant == "same_direction":
         # Same lane but one slightly ahead and offset laterally.
         pos1 = (0.0, -0.6, r1)
         pos2 = (miss / 2.0, -0.1, r2)
         vel1 = (0.0, v, 0.0)
         vel2 = (0.0, v * rng.uniform(1.05, 1.4), 0.0)  # ball2 faster but offset
-        delay2 = 0.0
     elif variant == "offset_head_on":
         # Head-on lanes offset so they miss.
         pos1 = (-miss / 2.0, -0.6, r1)
         pos2 = (miss / 2.0, 0.6, r2)
         vel1 = (0.0, v, 0.0)
         vel2 = (0.0, -v, 0.0)
-        delay2 = 0.0
     else:  # different_release
         # Same lane, second ball releases after the first passes the crossing
         # point. Realized by starting ball_b further back so it arrives late.
