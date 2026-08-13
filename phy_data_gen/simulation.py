@@ -205,17 +205,33 @@ def _sample_states(
     frame: int,
     timestamp: float,
 ) -> None:
+    import torch
     import warp as wp
 
-    for object_id, view in views.items():
-        transform = wp.to_torch(view.get_transforms().contiguous())[0].cpu().tolist()
-        velocity = wp.to_torch(view.get_velocities().contiguous())[0].cpu().tolist()
+    object_ids = list(views.keys())
 
-        position = transform[:3]
+    # Batch GPU→CPU: collect all transforms and velocities, sync once per
+    # modality instead of per object.  torch.cat on GPU tensors is fast
+    # (GPU→GPU copy); the single .cpu() replaces N separate synchronous
+    # transfers.
+    transforms_gpu = [
+        wp.to_torch(views[oid].get_transforms().contiguous()) for oid in object_ids
+    ]
+    velocities_gpu = [
+        wp.to_torch(views[oid].get_velocities().contiguous()) for oid in object_ids
+    ]
+    all_transforms = torch.cat(transforms_gpu).cpu().numpy()
+    all_velocities = torch.cat(velocities_gpu).cpu().numpy()
+
+    for i, object_id in enumerate(object_ids):
+        transform = all_transforms[i]
+        velocity = all_velocities[i]
+
+        position = transform[:3].tolist()
         # PhysX tensor transforms store quaternions in (x, y, z, w) order.
-        orientation = transform[3:7]
-        lin_vel = velocity[:3]
-        ang_vel = velocity[3:6]
+        orientation = transform[3:7].tolist()
+        lin_vel = velocity[:3].tolist()
+        ang_vel = velocity[3:6].tolist()
 
         recorder.append(
             frame=frame,

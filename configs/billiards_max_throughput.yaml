@@ -1,0 +1,41 @@
+# Max-throughput billiards config — maximum performance on RTX 5090
+# Aggressive optimizations:
+#   - 960×540 resolution  (27% of 1080p pixels)
+#   - 2 cameras instead of 4  (half the render work)
+#   - 240 Hz physics dt    (half the sim steps)
+# This is for the "crank through 50h as fast as possible" scenario.
+
+template_root: data/templates/cosmos3/billiards
+asset_root: data/assets/molmospaces
+registry_path: data/assets/registry.json
+output_root: outputs/billiards
+
+backend: physx
+seed: 42
+template_seed: 42
+num_objects: 0
+
+scene:
+  name: billiards
+  object_mode: replace_assets
+  replace_initially_moving_objects: false
+  world_prim: /World
+  physics_scene_prim: /PhysicsScene
+  ground_prim: /World/TableSurface
+
+  cameras:
+    BehindCue: /World/Camera_BehindCue
+    TopDown: /World/Camera_TopDown
+
+  dynamic_prims: []
+
+simulation:
+  physics_dt: 0.004166666666666667   # 1/240 = 1200 steps per 5s episode
+  render_fps: 30
+  duration_seconds: 5.0
+
+render:
+  width: 960
+  height: 540
+  depth_scale_meters: 0.001
+  rgb_encoder: h264_nvenc

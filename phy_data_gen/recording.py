@@ -13,6 +13,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
 
+import numpy as np
+
 
 class StateRecorder:
     """Accumulate per-frame object states and dump them to JSONL."""
@@ -59,12 +61,25 @@ class _VideoPipe:
         if self.output_path.exists():
             self.output_path.unlink()
 
-        self._process = subprocess.Popen(
-            command,
-            stdin=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            bufsize=16 * 1024 * 1024,
+        # ffmpeg stderr goes to a sidecar log file instead of a pipe. A pipe
+        # with no reader fills up (~64 KB) and blocks ffmpeg forever once it
+        # starts writing, which deadlocks ``close()``/``wait()`` when many
+        # encoders fail at once (e.g. NVENC concurrent-session exhaustion).
+        self._stderr_path = self.output_path.with_suffix(
+            self.output_path.suffix + ".stderr.log"
         )
+        self._stderr_path.unlink(missing_ok=True)
+        self._stderr_file = self._stderr_path.open("w", encoding="utf-8")
+        try:
+            self._process = subprocess.Popen(
+                command,
+                stdin=subprocess.PIPE,
+                stderr=self._stderr_file,
+                bufsize=16 * 1024 * 1024,
+            )
+        except BaseException:
+            self._stderr_file.close()
+            raise
 
     def write(self, frame_bytes: bytes) -> None:
         if self._process.stdin is None:
@@ -81,6 +96,7 @@ class _VideoPipe:
         if self._process.stdin is not None and not self._process.stdin.closed:
             self._process.stdin.close()
         return_code = self._process.wait()
+        self._stderr_file.close()
         stderr = self._read_stderr()
         if return_code != 0:
             raise RuntimeError(
@@ -91,11 +107,14 @@ class _VideoPipe:
         if self._process.poll() is None:
             self._process.terminate()
             self._process.wait()
+        self._stderr_file.close()
 
     def _read_stderr(self) -> str:
-        if self._process.stderr is None:
+        try:
+            content = self._stderr_path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
             return ""
-        return self._process.stderr.read().decode("utf-8", errors="replace").strip()
+        return content.strip()
 
 
 @dataclass
@@ -136,6 +155,8 @@ class FrameRecorder:
         self.rgb_encoder = rgb_encoder
         self._captures: dict[str, _CameraCapture] = {}
         self.captured_frames = 0
+        # Pre-allocate depth buffer to reduce allocation churn.
+        self._depth_buffer = np.zeros((height, width), dtype=np.uint16)
 
     @property
     def rgb_paths(self) -> dict[str, Path]:
@@ -175,11 +196,16 @@ class FrameRecorder:
                 depth_pipe=_VideoPipe(self._depth_command(depth_path), depth_path),
             )
 
-    def capture(self, simulation_app) -> None:
-        import numpy as np
+    def capture(self, simulation_app, update: bool = True) -> None:
+        """Capture attached annotators, optionally advancing Kit first.
 
-        # One Kit update renders every attached camera and both annotators.
-        simulation_app.update()
+        Batch replay attaches several recorders to one stage, advances Kit
+        once, then reads every recorder with ``update=False``.
+        """
+
+        # One Kit update renders every attached render product.
+        if update:
+            simulation_app.update()
         for camera_name, capture in self._captures.items():
             rgb = np.asarray(capture.rgb_annotator.get_data())
             if rgb.ndim != 3 or rgb.shape[2] < 3:
@@ -196,11 +222,13 @@ class FrameRecorder:
                 raise RuntimeError(
                     f"Depth annotator for {camera_name} returned shape {depth.shape}"
                 )
+            # Reuse pre-allocated buffer: fill with 0 for invalid pixels,
+            # scale valid (finite, positive) depths into the buffer.
+            self._depth_buffer.fill(0)
             valid = np.isfinite(depth) & (depth > 0.0)
-            depth_u16 = np.zeros(depth.shape, dtype="<u2")
-            scaled = np.rint(depth[valid] / self.depth_scale_meters)
-            depth_u16[valid] = np.clip(scaled, 1, 65535).astype(np.uint16)
-            capture.depth_pipe.write(np.ascontiguousarray(depth_u16).tobytes())
+            scaled = np.rint(depth[valid] / self.depth_scale_meters).clip(1, 65535).astype(np.uint16)
+            self._depth_buffer[valid] = scaled
+            capture.depth_pipe.write(np.ascontiguousarray(self._depth_buffer).tobytes())
 
         self.captured_frames += 1
 

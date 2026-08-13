@@ -10,6 +10,7 @@ This module has no Isaac Sim runtime dependency; it only reads JSON/YAML.
 
 from __future__ import annotations
 
+import functools
 import json
 import math
 import random
@@ -109,7 +110,30 @@ def _replacement_targets(
     template_path: Path,
     config: RunConfig,
 ) -> list[tuple[str, float, bool]]:
-    """Return target paths, local dimensions, and missing-body flags."""
+    """Return target paths, local dimensions, and missing-body flags.
+
+    Results are cached by template path + seed to avoid re-parsing the same
+    USD template across episodes that share it.
+    """
+
+    return _replacement_targets_impl(
+        str(template_path.resolve()),
+        config.scene.world_prim,
+        config.scene.replace_initially_moving_objects,
+        tuple(sorted(config.scene.dynamic_prims)),
+    )
+
+
+@functools.lru_cache(maxsize=None)
+def _replacement_targets_impl(
+    template_path_str: str,
+    world_prim_path: str,
+    replace_initially_moving: bool,
+    dynamic_prims: tuple[str, ...],
+) -> list[tuple[str, float, bool]]:
+    from pathlib import Path
+
+    template_path = Path(template_path_str)
 
     # Importing Usd registers the USDA file-format plugin used by Sdf.
     from pxr import Sdf, Usd  # noqa: F401
@@ -118,13 +142,13 @@ def _replacement_targets(
     if layer is None:
         raise RuntimeError(f"Failed to open template: {template_path}")
 
-    world = layer.GetPrimAtPath(config.scene.world_prim)
+    world = layer.GetPrimAtPath(world_prim_path)
     if world is None:
-        raise RuntimeError(f"World prim not found: {config.scene.world_prim}")
+        raise RuntimeError(f"World prim not found: {world_prim_path}")
 
     roots = []
-    if config.scene.dynamic_prims:
-        for prim_path in config.scene.dynamic_prims:
+    if dynamic_prims:
+        for prim_path in dynamic_prims:
             prim = layer.GetPrimAtPath(prim_path)
             if prim is None:
                 raise RuntimeError(f"Replacement prim not found: {prim_path}")
@@ -170,7 +194,7 @@ def _replacement_targets(
         return math.sqrt(sum(float(value) ** 2 for value in velocity.default)) > 1e-6
 
     targets_by_path = {}
-    if config.scene.dynamic_prims:
+    if dynamic_prims:
         for root in roots:
             matches = [prim for prim in walk(root) if has_rigid_body_api(prim)]
             if len(matches) > 1:
@@ -199,13 +223,13 @@ def _replacement_targets(
 
     if not targets_by_path:
         raise RuntimeError(
-            f"No replacement targets found below: {config.scene.world_prim}"
+            f"No replacement targets found below: {world_prim_path}"
         )
 
     targets = []
     for prim_path, (prim, create_rigid_body) in sorted(targets_by_path.items()):
         if (
-            not config.scene.replace_initially_moving_objects
+            not replace_initially_moving
             and is_initially_moving(prim)
         ):
             continue
@@ -216,8 +240,20 @@ def _replacement_targets(
 def _asset_info(
     asset_path: Path,
 ) -> tuple[tuple[float, float, float], str | None]:
-    """Return bbox center and the relative rigid-body path for a local asset."""
+    """Return bbox center and the relative rigid-body path for a local asset.
 
+    Results are cached by asset path to avoid re-opening the same USD file
+    across thousands of episodes.
+    """
+
+    return _asset_info_impl(str(asset_path.resolve()))
+
+
+@functools.lru_cache(maxsize=None)
+def _asset_info_impl(asset_path_str: str) -> tuple[tuple[float, float, float], str | None]:
+    from pathlib import Path
+
+    asset_path = Path(asset_path_str)
     from pxr import Usd, UsdGeom, UsdPhysics
 
     stage = Usd.Stage.Open(str(asset_path))

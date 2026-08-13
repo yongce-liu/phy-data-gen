@@ -87,6 +87,27 @@ outputs/
 - RGB 和深度直接从同一次渲染读取并流式写入 FFmpeg，不生成中间 PNG。
 - 配置多个相机时，所有相机共享同一次物理仿真。
 
+## 离线渲染
+
+使用 `--no-frames` 生成的物理轨迹可以在不重新运行 PhysX 的情况下回放渲染：
+
+```bash
+uv run python scripts/render_from_states.py \
+  --config configs/billiards_high_throughput.yaml \
+  --device cuda:0 \
+  --num-episodes 5000 \
+  --batch-size 4
+```
+
+脚本默认跳过所有选定相机均已有非空 RGB 和深度文件的 episode，因此重复执行
+即可断点续渲染。使用 `--overwrite` 强制重渲染；使用 `--seed-start 1000` 从指定
+seed 开始；使用 `--cameras TopDown Corner` 仅渲染部分相机。`--frame-stride 2`
+每两帧渲染一帧，并将输出帧率同步降为原来的一半。
+
+`--batch-size` 控制一个 Isaac Sim stage 中并行回放的环境数量。每批环境挂载在
+独立的 `/World/envs/env_N` 下；同一个逻辑帧只执行一次 Kit update，再读取整批
+环境的所有相机。建议从 `--batch-size 2`、`4`、`8` 逐级测试 GPU 显存和吞吐量。
+
 读取深度时，将 MKV 解码为 `uint16`，再乘相机 JSON 中的
 `depth_encoding.scale_meters`：
 
