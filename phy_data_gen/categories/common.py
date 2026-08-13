@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import math
+import random
 from pathlib import Path
 
 from phy_data_gen.config import RunConfig
@@ -183,6 +184,52 @@ def standard_config_cameras(names: tuple[str, ...] = ("Side", "Front", "Top", "A
     return {name: f"/World/Camera_{name}" for name in names}
 
 
+def background_props(
+    config: RunConfig,
+    rng,
+    count: int = 2,
+    prefixes: set[str] | None = None,
+) -> list[ObjectSpec]:
+    """Return a few static registry assets as fixed background decoration.
+
+    Props are placed off the billiards playing surface (around the table) and
+    are ``dynamic=False`` + ``record=False`` so they only add visual variety,
+    never interfere with the physics or get recorded.
+    """
+
+    if prefixes is None:
+        prefixes = {"Vase_Medium", "Vase_Tall", "Cup", "Bowl", "Plate", "Houseplant", "Candle"}
+    assets = registry_assets_by_prefix(config.registry_path, prefixes)
+    if not assets:
+        return []
+
+    props = []
+    rng.shuffle(assets)
+    # Table is ~2.4 x 4.2 m; place props off the corners as background.
+    for i in range(min(count, len(assets))):
+        asset = assets[i]
+        dim = float(asset["max_dimension"])
+        scale = rng.uniform(0.6, 1.2) * (0.15 / dim if dim > 0 else 1.0)
+        # Positions just outside the table corners, at floor level.
+        corner = rng.choice([(-1.6, 2.6), (1.6, 2.6), (-1.6, -2.6), (1.6, -2.6)])
+        jitter = (rng.uniform(-0.3, 0.3), rng.uniform(-0.3, 0.3))
+        props.append(
+            ObjectSpec(
+                object_id=f"bg_prop_{i}",
+                asset_path=str(asset["usd_path"]),
+                position=(corner[0] + jitter[0], corner[1] + jitter[1], 0.1 * scale),
+                orientation_xyzw=(0.0, 0.0, 0.0, 1.0),
+                scale=scale,
+                mass=1e9,
+                material=make_material(0.1),
+                kind="asset",
+                dynamic=False,
+                record=False,
+            )
+        )
+    return props
+
+
 def build_episode(
     config: RunConfig,
     episode_id: str,
@@ -193,8 +240,17 @@ def build_episode(
     physics_dt: float | None = None,
     runner: str = "rigid",
     metadata: dict[str, object] | None = None,
+    background: bool = True,
 ) -> EpisodeSpec:
-    """Assemble an EpisodeSpec for a category episode."""
+    """Assemble an EpisodeSpec for a category episode.
+
+    When ``background`` is True (default), a couple of static registry assets
+    are added around the table for visual variety.
+    """
+
+    if background:
+        rng = random.Random(config.seed + 999_983)
+        objects = list(objects) + background_props(config, rng)
 
     return EpisodeSpec(
         episode_id=episode_id,
