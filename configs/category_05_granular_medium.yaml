@@ -1,0 +1,39 @@
+# Category 05 — ball into granular medium. Uses the committed empty-ground
+# template + a procedural sand tray; 2 cameras; 240 Hz physics (dt=1/240).
+
+category: category_05_granular_medium
+
+template_root: phy_data_gen/templates
+asset_root: data/assets/molmospaces
+registry_path: data/assets/registry.json
+output_root: outputs/category_05
+
+backend: physx
+seed: 42
+template_seed: 42
+num_objects: 0
+
+scene:
+  name: category_05
+  object_mode: procedural
+  replace_initially_moving_objects: false
+  world_prim: /World
+  physics_scene_prim: /PhysicsScene
+  ground_prim: /World/Ground
+
+  cameras:
+    Side: /World/Camera_Side
+    Top: /World/Camera_Top
+
+  dynamic_prims: []
+
+simulation:
+  physics_dt: 0.004166666666666667
+  render_fps: 30
+  duration_seconds: 5.0
+
+render:
+  width: 960
+  height: 540
+  depth_scale_meters: 0.001
+  rgb_encoder: h264_nvenc
