@@ -686,6 +686,23 @@ def _define_episode_cameras(stage, episode_spec: EpisodeSpec) -> None:
         _define_camera(stage, camera)
 
 
+def _apply_runner_scene_hook(stage, episode_spec: EpisodeSpec, scene: SceneConfig) -> None:
+    """Let a non-rigid runner author its own scene extensions.
+
+    Category 08's deformable runner uses this to build soft-ball meshes after
+    the generic object placement. Hook functions must be pure pxr (no runtime).
+    """
+
+    if episode_spec.runner == "rigid":
+        return
+    import importlib
+
+    module = importlib.import_module(f"phy_data_gen.runners.{episode_spec.runner}")
+    hook = getattr(module, "build_scene_hook", None)
+    if hook is not None:
+        hook(stage, episode_spec, scene)
+
+
 def build_scene(
     episode_spec: EpisodeSpec,
     scene: SceneConfig,
@@ -709,6 +726,7 @@ def build_scene(
         _define_episode_cameras(stage, episode_spec)
         for object_spec in episode_spec.objects:
             _add_object(stage, object_spec, scene)
+        _apply_runner_scene_hook(stage, episode_spec, scene)
         root_layer.Save()
         return output_path
 
@@ -743,6 +761,7 @@ def build_scene(
         for object_spec in episode_spec.objects:
             _add_object(stage, object_spec, scene)
         _define_episode_cameras(stage, episode_spec)
+        _apply_runner_scene_hook(stage, episode_spec, scene)
     elif episode_spec.object_mode == "replace_assets":
         if prepared_paths:
             print(
