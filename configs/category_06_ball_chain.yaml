@@ -1,0 +1,41 @@
+# Category 06 — ball-chain collisions (single/both-end impact, single/multi-ball
+# striker, equal/unequal mass chain, spaced chain). Billiards table backdrop.
+
+category: category_06_ball_chain
+
+template_root: data/templates/cosmos3/billiards
+asset_root: data/assets/molmospaces
+registry_path: data/assets/registry.json
+output_root: outputs/category_06
+
+backend: physx
+seed: 42
+template_seed: 42
+num_objects: 0
+
+scene:
+  name: category_06
+  object_mode: procedural
+  replace_initially_moving_objects: false
+  world_prim: /World
+  physics_scene_prim: /PhysicsScene
+  ground_prim: /World/TableSurface
+
+  cameras:
+    Side: /World/Camera_Side
+    Front: /World/Camera_Front
+    Top: /World/Camera_Top
+    Action: /World/Camera_Action
+
+  dynamic_prims: []
+
+simulation:
+  physics_dt: 0.004166666666666667
+  render_fps: 30
+  duration_seconds: 5.0
+
+render:
+  width: 1280
+  height: 720
+  depth_scale_meters: 0.001
+  rgb_encoder: h264_nvenc
