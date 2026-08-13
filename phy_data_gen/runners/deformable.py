@@ -196,6 +196,20 @@ def run_simulation(
     num_physics_steps = round(episode_spec.duration_seconds / episode_spec.physics_dt)
     capture_every = max(1, round(1.0 / (episode_spec.render_fps * episode_spec.physics_dt)))
 
+    # Deformable bodies require GPU dynamics on the physics scene. The USD
+    # template already declares physxScene:enableGPUDynamics, but re-assert it
+    # here so a physics scene created/overridden by the runtime keeps it on.
+    from pxr import Sdf
+
+    ps_prim = stage.GetPrimAtPath("/PhysicsScene")
+    if ps_prim.IsValid():
+        ps_prim.CreateAttribute(
+            "physxScene:enableGPUDynamics", Sdf.ValueTypeNames.Bool
+        ).Set(True)
+        ps_prim.CreateAttribute(
+            "physxScene:enableCCD", Sdf.ValueTypeNames.Bool
+        ).Set(True)
+
     sim = SimulationContext(SimulationCfg(dt=episode_spec.physics_dt))
 
     # Read the deformable mesh points directly from the USD stage each frame
