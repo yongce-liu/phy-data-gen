@@ -157,6 +157,7 @@ def build_episode(
     duration_seconds: float | None = None,
     physics_dt: float | None = None,
     runner: str = "rigid",
+    metadata: dict[str, object] | None = None,
 ) -> EpisodeSpec:
     """Assemble an EpisodeSpec for a category episode."""
 
@@ -172,6 +173,7 @@ def build_episode(
         objects=objects,
         cameras=cameras,
         runner=runner,
+        metadata=metadata or {},
     )
 
 
