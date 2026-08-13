@@ -1,0 +1,39 @@
+# Category 08 — soft-ball collision & deformation. Deformable runner, 2 cameras,
+# 120 Hz physics, 3 s episodes (soft-body FEM is expensive).
+
+category: category_08_soft_ball_deform
+
+template_root: data/templates/cosmos3/billiards
+asset_root: data/assets/molmospaces
+registry_path: data/assets/registry.json
+output_root: outputs/category_08
+
+backend: physx
+seed: 42
+template_seed: 42
+num_objects: 0
+
+scene:
+  name: category_08
+  object_mode: procedural
+  replace_initially_moving_objects: false
+  world_prim: /World
+  physics_scene_prim: /PhysicsScene
+  ground_prim: /World/TableSurface
+
+  cameras:
+    Side: /World/Camera_Side
+    Top: /World/Camera_Top
+
+  dynamic_prims: []
+
+simulation:
+  physics_dt: 0.008333333333333333   # 1/120
+  render_fps: 30
+  duration_seconds: 3.0
+
+render:
+  width: 960
+  height: 540
+  depth_scale_meters: 0.001
+  rgb_encoder: h264_nvenc
