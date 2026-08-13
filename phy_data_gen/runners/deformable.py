@@ -22,14 +22,18 @@ import numpy as np
 from phy_data_gen.config import SceneConfig
 from phy_data_gen.schemas import EpisodeSpec
 
-# ``isaacsim.core.experimental.prims`` (DeformablePrim) ships as a pip extension
-# under isaacsim/exts/ and is not on sys.path unless the extension is enabled.
-# The Isaac runtime launches from the venv, so add the extension dir to the
-# path so the import resolves inside run_simulation.
+# ``isaacsim.core.experimental.prims`` (DeformablePrim) and its dependencies
+# (isaacsim.core.experimental.utils, isaacsim.core.simulation_manager, …) ship
+# as pip extensions under isaacsim/exts/ and are not on sys.path unless each
+# extension is enabled. The Isaac runtime launches from the venv, so add every
+# ``isaacsim.core.*`` ext dir to the path so the imports resolve inside
+# run_simulation.
 _ISAACSIM_ROOT = Path(__file__).resolve().parents[3]  # .../site-packages/isaacsim
-_EXT = _ISAACSIM_ROOT / "exts" / "isaacsim.core.experimental.prims"
-if str(_EXT) not in sys.path:
-    sys.path.insert(0, str(_EXT))
+_EXTS = _ISAACSIM_ROOT / "exts"
+for _ext_dir in sorted(_EXTS.iterdir()) if _EXTS.is_dir() else []:
+    _pkg = _ext_dir / "isaacsim"
+    if (_pkg / "core").is_dir() and str(_ext_dir) not in sys.path:
+        sys.path.insert(0, str(_ext_dir))
 
 
 def _uv_sphere_mesh(stage, prim_path: str, radius: float, segments: int = 24, rings: int = 14):
