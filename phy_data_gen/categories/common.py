@@ -100,6 +100,7 @@ def box_spec(
     color: tuple[float, float, float] = (0.5, 0.4, 0.3),
     record: bool = True,
     dynamic: bool = True,
+    half_extents: tuple[float, float, float] | None = None,
 ) -> ObjectSpec:
     return ObjectSpec(
         object_id=object_id,
@@ -114,6 +115,7 @@ def box_spec(
         color=color,
         record=record,
         dynamic=dynamic,
+        half_extents=half_extents,
     )
 
 

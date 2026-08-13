@@ -244,7 +244,18 @@ def _add_primitive_object(
         geometry.CreateRadiusAttr(radius)
     else:
         geometry = UsdGeom.Cube.Define(stage, geometry_path)
-        geometry.CreateSizeAttr(2.0 * radius)
+        if object_spec.half_extents is not None:
+            # Per-axis box: unit cube scaled by 2*half_extents.
+            geometry.CreateSizeAttr(1.0)
+            from pxr import Gf
+
+            ext = object_spec.half_extents
+            geo_xform = UsdGeom.Xformable(geometry.GetPrim())
+            geo_xform.AddScaleOp(
+                precision=UsdGeom.XformOp.PrecisionDouble
+            ).Set(Gf.Vec3d(2.0 * ext[0], 2.0 * ext[1], 2.0 * ext[2]))
+        else:
+            geometry.CreateSizeAttr(2.0 * radius)
 
     collision_api = UsdPhysics.CollisionAPI.Apply(geometry.GetPrim())
     collision_api.CreateSimulationOwnerRel().SetTargets(
