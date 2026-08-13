@@ -149,33 +149,31 @@ def jittered_cameras(
     center: tuple[float, float, float],
     rng,
     names: tuple[str, ...] = ("Side", "Front", "Top", "Action"),
-    distance: float = 2.5,
-    height: float = 0.8,
 ) -> dict[str, CameraSpec]:
-    """A 4-camera ring with randomized per-episode position/zoom.
+    """A 4-camera rig that frames the table like the Cosmos billiards cameras.
 
-    Each camera keeps its general direction (side/front/top/action) but its
-    distance, height and focal length jitter per episode, so the action is
-    framed differently every time without losing the shot.
+    Anchor positions are the template's proven table-framing poses (low and
+    close to the table), jittered per episode so each shot differs slightly
+    without losing the table/balls in frame.
     """
 
+    anchors = {
+        "Side": (0.0, -2.0, 0.75),     # behind, looking along the table
+        "Front": (0.0, 2.0, 0.9),      # front, slightly higher
+        "Top": (0.0, 0.0, 3.2),        # overhead
+        "Action": (1.4, 0.7, 1.05),    # near the impact zone
+    }
     specs = {}
-    base_angles = {"Side": 90.0, "Front": 0.0, "Top": None, "Action": 45.0}
     for name in names:
+        ax, ay, az = anchors.get(name, (0.0, -2.0, 0.75))
         if name == "Top":
-            d = rng.uniform(distance * 0.9, distance * 1.4)
-            pos = (center[0], center[1], height * 3.0 + rng.uniform(-0.3, 0.3))
-            focal = rng.uniform(20.0, 35.0)
+            pos = (ax, ay, az + rng.uniform(-0.4, 0.4))
         else:
-            angle = math.radians(base_angles.get(name, 45.0))
-            d = rng.uniform(distance * 0.8, distance * 1.3)
-            h = height + rng.uniform(-0.2, 0.2)
-            pos = (
-                center[0] + d * math.cos(angle),
-                center[1] + d * math.sin(angle),
-                h,
-            )
-            focal = rng.uniform(24.0, 40.0)
+            # Jitter around the anchor: radius 0.15-0.3 m, height ±0.2 m.
+            d = rng.uniform(0.15, 0.3)
+            ang = rng.uniform(0, 2 * math.pi)
+            pos = (ax + d * math.cos(ang), ay + d * math.sin(ang), az + rng.uniform(-0.2, 0.2))
+        focal = rng.uniform(24.0, 38.0)
         specs[name] = camera_spec(name, pos, center, focal_length=focal)
     return specs
 
