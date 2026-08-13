@@ -7,10 +7,6 @@
 
 def Xform "World"
 {
-    def PhysicsScene "PhysicsScene"
-    {
-    }
-
     def Xform "Ground"
     {
         def Cube "Geometry" (
@@ -25,3 +21,10 @@ def Xform "World"
         }
     }
 }
+
+# Top-level PhysicsScene, matching the Cosmos billiards templates and the
+# category configs' physics_scene_prim = /PhysicsScene.
+def PhysicsScene "PhysicsScene"
+{
+}
+
