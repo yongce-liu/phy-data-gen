@@ -846,6 +846,15 @@ def build_scene(
 
     if episode_spec.object_mode in {"generated_objects", "procedural"}:
         _disable_template_dynamics(stage, scene)
+        # Author an "over" on the template's World prim in the root layer so
+        # that descendants added below (GeneratedObjects, InvisibleGround)
+        # don't force pxr to write a type-less `def "World"` that would hide
+        # the sublayer's Xform type and, with it, its PhysicsScene/Ground
+        # children. (Billiards templates happen to do this via ball
+        # deactivation, but e.g. the empty-ground template doesn't.)
+        world_prim = stage.GetPrimAtPath(scene.world_prim)
+        if world_prim and world_prim.IsValid():
+            stage.OverridePrim(scene.world_prim)
         # Procedural backdrop (tray, extra walls, ground) may be authored even
         # when a template supplies the base scene.
         _build_procedural_backdrop(stage, scene)
