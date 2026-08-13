@@ -69,7 +69,6 @@ def _pile_grains(
     base_radius = 0.21
     height = 0.18
     layer_gap = spacing * math.sqrt(2.0 / 3.0)
-    layers = max(1, int(height / layer_gap))
     grains = []
     count = 0
     row = 0
