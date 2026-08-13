@@ -84,6 +84,15 @@ class _VideoPipe:
     def write(self, frame_bytes: bytes) -> None:
         if self._process.stdin is None:
             raise RuntimeError(f"FFmpeg stdin is unavailable for {self.output_path}")
+        # If the encoder process has exited, writing to its stdin would block
+        # forever on the full pipe. Check liveness first so a dead encoder
+        # raises immediately instead of deadlocking the simulation loop.
+        if self._process.poll() is not None:
+            stderr = self._read_stderr()
+            raise RuntimeError(
+                f"FFmpeg exited before write for {self.output_path} "
+                f"(code {self._process.returncode}): {stderr}"
+            )
         try:
             self._process.stdin.write(frame_bytes)
         except BrokenPipeError as error:
