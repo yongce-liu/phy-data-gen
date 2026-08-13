@@ -329,11 +329,11 @@ def main() -> int:
                     result.states.records,
                     require_fall=spec.object_mode == "generated_objects",
                 )
+                save_validation(summary, physics_dir / "validation.json")
             else:
                 # Deformable runner (category 08) writes its own
                 # deformable_states/nodes JSONL + validation inside the runner.
-                summary = {}
-            save_validation(summary, physics_dir / "validation.json")
+                pass
             t2 = time.perf_counter()
 
             SimulationContext.clear_instance()
