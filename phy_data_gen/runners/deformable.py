@@ -140,6 +140,24 @@ def run_simulation(
         # The mesh sits under the object Xform; create the deformable hierarchy
         # using the Xform as root (must not be a Gprim).
         root_path = f"/World/GeneratedObjects/{obj.object_id}"
+        # The generic object authoring applied a rigid-body API to the Xform;
+        # PhysX rejects a deformable volume whose root is also a rigid body.
+        # Strip the rigid-body/mass/physics-material APIs and the CCD options
+        # so the volume hierarchy can take over.
+        root_prim = stage.GetPrimAtPath(root_path)
+        if root_prim:
+            from pxr import UsdPhysics
+
+            root_prim.RemoveProperty("physics:velocity")
+            root_prim.RemoveProperty("physics:angularVelocity")
+            root_prim.RemoveProperty("physics:mass")
+            root_prim.RemoveProperty("physxRigidBody:enableCCD")
+            root_prim.RemoveProperty("physxRigidBody:maxDepenetrationVelocity")
+            root_prim.RemoveProperty("physxRigidBody:maxLinearVelocity")
+            # Remove the applied schemas so PhysX no longer treats the Xform
+            # as a rigid body.
+            root_prim.RemoveAPI(UsdPhysics.RigidBodyAPI)
+            root_prim.RemoveAPI(UsdPhysics.MassAPI)
         sim_mesh_path = f"{root_path}/SimMesh"
         cooking = geometry_path
         ok = deformableUtils.create_auto_volume_deformable_hierarchy(
