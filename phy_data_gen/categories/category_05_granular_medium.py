@@ -65,9 +65,9 @@ def _pile_grains(
     Centre spacing 2.2 x grain_r avoids initial overlaps.
     """
 
-    spacing = 2.2 * grain_r
-    base_radius = 0.21
-    height = 0.18
+    spacing = 2.1 * grain_r
+    base_radius = 0.24
+    height = 0.20
     layer_gap = spacing * math.sqrt(2.0 / 3.0)
     grains = []
     count = 0
