@@ -50,12 +50,19 @@ def _find_generated_rigid_body_paths(
     stage,
     episode_spec: EpisodeSpec,
 ) -> dict[str, str]:
-    """Resolve the single rigid-body prim below each generated object."""
+    """Resolve the single rigid-body prim below each generated object.
+
+    Objects with ``record=False`` (sand grains, static container walls) are
+    simulated by PhysX but excluded here, so they never get per-object state
+    views.
+    """
 
     from pxr import Usd, UsdPhysics
 
     paths: dict[str, str] = {}
     for object_spec in episode_spec.objects:
+        if not object_spec.record or not object_spec.dynamic:
+            continue
         object_path = f"{_GENERATED_ROOT}/{object_spec.object_id}"
         root_prim = stage.GetPrimAtPath(object_path)
         if not root_prim or not root_prim.IsValid():
@@ -162,7 +169,7 @@ def _find_rigid_body_paths(
     episode_spec: EpisodeSpec,
     world_prim_path: str,
 ) -> dict[str, str]:
-    if episode_spec.object_mode == "generated_objects":
+    if episode_spec.object_mode in {"generated_objects", "procedural"}:
         return _find_generated_rigid_body_paths(stage, episode_spec)
     if episode_spec.object_mode == "template_dynamics":
         return _find_template_rigid_body_paths(stage, world_prim_path)
@@ -261,6 +268,28 @@ def run_simulation(
 
     import omni.usd
     from isaaclab.sim import SimulationCfg, SimulationContext
+
+    # Deformable (soft-body) episodes run through a dedicated runner module so
+    # the rigid-body path stays untouched. Only category 08 provides it.
+    if episode_spec.runner != "rigid":
+        import importlib
+
+        module = importlib.import_module(
+            f"phy_data_gen.runners.{episode_spec.runner}"
+        )
+        return module.run_simulation(
+            scene_path=scene_path,
+            episode_spec=episode_spec,
+            simulation_app=simulation_app,
+            output_root=output_root,
+            cameras=cameras,
+            world_prim_path=world_prim_path,
+            render_width=render_width,
+            render_height=render_height,
+            depth_scale_meters=depth_scale_meters,
+            rgb_encoder=rgb_encoder,
+            capture_frames=capture_frames,
+        )
 
     context = omni.usd.get_context()
     resolved = scene_path.resolve()

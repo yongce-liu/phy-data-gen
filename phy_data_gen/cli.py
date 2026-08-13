@@ -61,7 +61,11 @@ def _resolve_run_id(config, episode_id: str | None) -> str:
     from phy_data_gen.episode import select_template_path
 
     template_path = select_template_path(config)
-    return episode_id or default_run_id(config.scene.name, template_path, config.seed)
+    if episode_id:
+        return episode_id
+    # Procedural categories always resolve a template (minimal or backdrop);
+    # keep the run ID seed-suffixed so resume/`_find_last_episode` work.
+    return default_run_id(config.scene.name, template_path, config.seed)
 
 
 def _run_build_registry(command: BuildRegistryCommand) -> None:

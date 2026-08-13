@@ -1,0 +1,24 @@
+#usda 1.0
+(
+    defaultPrim = "World"
+    metersPerUnit = 1
+    upAxis = "Z"
+)
+
+def Xform "World"
+{
+    def PhysicsScene "PhysicsScene"
+    {
+    }
+
+    def Xform "Ground"
+    {
+        def Cube "Geometry"
+        {
+            float3[] extent = [(-0.5, -0.5, -0.5), (0.5, 0.5, 0.5)]
+            float3[] xformOp:translate = (0, 0, -0.05)
+            float3[] xformOp:scale = (4, 4, 0.1)
+            uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
+        }
+    }
+}

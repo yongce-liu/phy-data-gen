@@ -20,7 +20,12 @@ import tyro
 
 from phy_data_gen.config import SceneConfig, load_config
 from phy_data_gen.episode import create_episode_spec
-from phy_data_gen.schemas import AssetReplacementSpec, EpisodeSpec, ObjectSpec
+from phy_data_gen.schemas import (
+    AssetReplacementSpec,
+    CameraSpec,
+    EpisodeSpec,
+    ObjectSpec,
+)
 
 _GENERATED_ROOT = "/World/GeneratedObjects"
 
@@ -91,6 +96,86 @@ def _prims_with_api(root_prim, api) -> list:
     return [prim for prim in Usd.PrimRange(root_prim) if prim.HasAPI(api)]
 
 
+def _bind_physics_material(stage, prim, object_spec: ObjectSpec) -> None:
+    """Author a physics material below ``prim`` and bind it to ``prim``."""
+
+    from pxr import UsdPhysics, UsdShade
+
+    material_path = f"{prim.GetPath()}/PhysicsMaterial"
+    material_prim = stage.DefinePrim(material_path, "Material")
+    material_api = UsdPhysics.MaterialAPI.Apply(material_prim)
+    material_api.CreateStaticFrictionAttr(object_spec.material.static_friction)
+    material_api.CreateDynamicFrictionAttr(object_spec.material.dynamic_friction)
+    material_api.CreateRestitutionAttr(object_spec.material.restitution)
+
+    binding_api = UsdShade.MaterialBindingAPI.Apply(prim)
+    material = UsdShade.Material(material_prim)
+    binding_api.Bind(
+        material,
+        bindingStrength=UsdShade.Tokens.strongerThanDescendants,
+        materialPurpose="physics",
+    )
+
+
+def _bind_visual_color(stage, geometry_prim, color: tuple[float, float, float]) -> None:
+    """Bind a simple USDPreviewSurface material with ``color`` to a gprim."""
+
+    from pxr import Sdf, UsdShade
+
+    prim = geometry_prim.GetPrim()
+    material_path = f"{str(prim.GetPath())}/VisualMaterial"
+    material = UsdShade.Material.Define(stage, material_path)
+    shader_path = f"{material_path}/PreviewSurface"
+    shader = UsdShade.Shader.Define(stage, shader_path)
+    shader.CreateIdAttr("UsdPreviewSurface")
+    shader.CreateInput("diffuseColor", Sdf.ValueTypeNames.Color3f).Set(
+        (float(color[0]), float(color[1]), float(color[2]))
+    )
+    shader.CreateInput("roughness", Sdf.ValueTypeNames.Float).Set(0.5)
+    shader_output = shader.CreateOutput("surface", Sdf.ValueTypeNames.Token)
+    material.CreateSurfaceOutput().ConnectToSource(shader_output)
+
+    binding = UsdShade.MaterialBindingAPI.Apply(prim)
+    binding.Bind(
+        material,
+        bindingStrength=UsdShade.Tokens.weakerThanDescendants,
+        materialPurpose="all",
+    )
+
+
+def _apply_rigid_body_options(stage, prim, object_spec: ObjectSpec) -> None:
+    """Author per-body CCD, mass, velocity and angular velocity on a rigid body.
+
+    Velocity is authored on the prim carrying ``PhysicsRigidBodyAPI`` exactly
+    like the billiards ``CueBall`` template (physics:velocity in m/s,
+    physics:angularVelocity in rad/s). PhysX picks these up when loading
+    physics from USD during ``SimulationContext.reset()``.
+    """
+
+    from pxr import Sdf, UsdPhysics
+
+    rigid_api = UsdPhysics.RigidBodyAPI.Apply(prim)
+    rigid_api.CreateVelocityAttr().Set(object_spec.initial_linear_velocity)
+    rigid_api.CreateAngularVelocityAttr().Set(object_spec.initial_angular_velocity)
+
+    # The PhysxRigidBodyAPI schema class lives in the PhysX plugin, which is
+    # unavailable before the app launches. Author the well-known attribute
+    # names directly so scene building stays runtime-independent.
+    ccd = prim.CreateAttribute("physxRigidBody:enableCCD", Sdf.ValueTypeNames.Bool)
+    ccd.Set(True)
+    max_depenetration = prim.CreateAttribute(
+        "physxRigidBody:maxDepenetrationVelocity", Sdf.ValueTypeNames.Float
+    )
+    max_depenetration.Set(100000.0)
+    max_linear = prim.CreateAttribute(
+        "physxRigidBody:maxLinearVelocity", Sdf.ValueTypeNames.Float
+    )
+    max_linear.Set(1000.0)
+
+    mass_api = UsdPhysics.MassAPI.Apply(prim)
+    mass_api.CreateMassAttr(object_spec.mass)
+
+
 def _apply_physics(stage, prim, object_spec: ObjectSpec) -> None:
     """Override physics on the asset's single rigid body.
 
@@ -100,7 +185,7 @@ def _apply_physics(stage, prim, object_spec: ObjectSpec) -> None:
     object, so the existing body is reused instead.
     """
 
-    from pxr import UsdPhysics, UsdShade
+    from pxr import UsdPhysics
 
     rigid_prims = _prims_with_api(prim, UsdPhysics.RigidBodyAPI)
     if len(rigid_prims) > 1:
@@ -120,31 +205,74 @@ def _apply_physics(stage, prim, object_spec: ObjectSpec) -> None:
     if not rigid_prims:
         UsdPhysics.RigidBodyAPI.Apply(rigid_prim)
 
-    mass_api = UsdPhysics.MassAPI.Apply(rigid_prim)
-    mass_api.CreateMassAttr(object_spec.mass)
+    _apply_rigid_body_options(stage, rigid_prim, object_spec)
+    _bind_physics_material(stage, rigid_prim, object_spec)
 
-    # Author a physics material and bind it to the effective rigid body.
-    material_path = f"{prim.GetPath()}/PhysicsMaterial"
-    material_prim = stage.DefinePrim(material_path, "Material")
-    material_api = UsdPhysics.MaterialAPI.Apply(material_prim)
-    material_api.CreateStaticFrictionAttr(object_spec.material.static_friction)
-    material_api.CreateDynamicFrictionAttr(object_spec.material.dynamic_friction)
-    material_api.CreateRestitutionAttr(object_spec.material.restitution)
 
-    binding_api = UsdShade.MaterialBindingAPI.Apply(rigid_prim)
-    material = UsdShade.Material(material_prim)
-    binding_api.Bind(
-        material,
-        bindingStrength=UsdShade.Tokens.strongerThanDescendants,
-        materialPurpose="physics",
+def _add_primitive_object(
+    stage,
+    object_spec: ObjectSpec,
+    scene: SceneConfig,
+    prim_path: str,
+) -> str:
+    """Add a procedurally defined sphere or box with rigid-body physics.
+
+    Exactly one rigid body is authored below the object root (on the Xform)
+    so ``_find_generated_rigid_body_paths`` in simulation.py resolves it the
+    same way as a referenced asset.
+    """
+
+    from pxr import Sdf, UsdGeom, UsdPhysics
+
+    prim = stage.DefinePrim(prim_path, "Xform")
+    _set_object_transform(prim, object_spec)
+
+    radius = object_spec.radius if object_spec.radius is not None else 0.05
+    geometry_path = f"{prim_path}/Geometry"
+    if object_spec.kind == "sphere":
+        geometry = UsdGeom.Sphere.Define(stage, geometry_path)
+        geometry.CreateRadiusAttr(radius)
+    else:
+        geometry = UsdGeom.Cube.Define(stage, geometry_path)
+        geometry.CreateSizeAttr(2.0 * radius)
+
+    collision_api = UsdPhysics.CollisionAPI.Apply(geometry.GetPrim())
+    collision_api.CreateSimulationOwnerRel().SetTargets(
+        [Sdf.Path(scene.physics_scene_prim)]
     )
 
+    if object_spec.dynamic:
+        _apply_rigid_body_options(stage, prim, object_spec)
+    _bind_physics_material(stage, prim, object_spec)
+    _bind_visual_color(stage, geometry.GetPrim(), object_spec.color)
+    return prim_path
 
-def _add_object(stage, object_spec: ObjectSpec) -> str:
-    prim_path = f"{_GENERATED_ROOT}/{object_spec.object_id}"
+
+def _object_prim_path(object_spec: ObjectSpec) -> str:
+    """Resolve the placement path for a generated object.
+
+    ``record=False`` objects (sand grains, static container walls) are placed
+    below ``/World/GeneratedObjects/Bulk`` so the per-object discovery in
+    simulation.py can skip them while PhysX still simulates them.
+    """
+
+    if object_spec.record:
+        return f"{_GENERATED_ROOT}/{object_spec.object_id}"
+    return f"{_GENERATED_ROOT}/Bulk/{object_spec.object_id}"
+
+
+def _add_object(stage, object_spec: ObjectSpec, scene: SceneConfig) -> str:
+    prim_path = _object_prim_path(object_spec)
+    if object_spec.kind != "asset":
+        return _add_primitive_object(stage, object_spec, scene, prim_path)
     prim = stage.DefinePrim(prim_path, "Xform")
 
     asset_path = Path(object_spec.asset_path)
+    if not asset_path.is_file():
+        raise FileNotFoundError(
+            f"Asset for {object_spec.object_id} is not available locally: "
+            f"{asset_path}"
+        )
     prim.GetReferences().AddReference(str(asset_path.resolve()))
 
     _set_object_transform(prim, object_spec)
@@ -366,6 +494,177 @@ def _finish_prepared_primitives(stage, scene: SceneConfig, prim_paths: list[str]
         )
 
 
+def _define_camera(stage, camera: CameraSpec) -> None:
+    """Author a camera prim using the Cosmos translate+rotateXYZ convention.
+
+    ``look_at`` (if given) orients the camera so its local -Z axis points at
+    the target. When neither ``look_at`` nor ``orientation_xyzw`` is given the
+    camera keeps its identity orientation.
+    """
+
+    from pxr import Gf, UsdGeom
+
+    prim = UsdGeom.Camera.Define(stage, camera.prim_path)
+    prim.CreateFocalLengthAttr(camera.focal_length)
+    prim.CreateHorizontalApertureAttr(camera.horizontal_aperture)
+    prim.CreateVerticalApertureAttr(camera.vertical_aperture)
+    prim.CreateClippingRangeAttr(Gf.Vec2f(1.0, 1_000_000.0))
+
+    xform = UsdGeom.Xformable(prim.GetPrim())
+    xform.ClearXformOpOrder()
+    precision = UsdGeom.XformOp.PrecisionDouble
+    translate_op = xform.AddTranslateOp(precision=precision)
+    translate_op.Set(Gf.Vec3d(*camera.position))
+
+    if camera.orientation_xyzw is not None:
+        x, y, z, w = (float(value) for value in camera.orientation_xyzw)
+        rot = Gf.Rotation(Gf.Quatd(w, Gf.Vec3d(x, y, z)))
+        euler = rot.Decompose(Gf.Vec3d(1, 0, 0), Gf.Vec3d(0, 1, 0), Gf.Vec3d(0, 0, 1))
+        rotate_op = xform.AddRotateXYZOp(precision=precision)
+        rotate_op.Set(Gf.Vec3d(euler[0], euler[1], euler[2]))
+    elif camera.look_at is not None:
+        position = Gf.Vec3d(*camera.position)
+        target = Gf.Vec3d(*camera.look_at)
+        forward = (target - position).GetNormalized()
+        # Build the camera-to-world basis: local X = right, local Y = up,
+        # local Z = -forward (USD cameras look down their -Z axis).
+        world_up = Gf.Vec3d(0, 0, 1)
+        right = world_up.GetCross(forward).GetNormalized()
+        up = forward.GetCross(right)
+        basis = Gf.Matrix3d(1)
+        basis.SetColumn(0, right)
+        basis.SetColumn(1, up)
+        basis.SetColumn(2, -forward)
+        # Extract the quaternion from the basis and use it directly via an
+        # orient op (double precision), matching the Cosmos camera convention.
+        quat = basis.ExtractRotation().GetQuat()
+        orient_op = xform.AddOrientOp(precision=precision)
+        orient_op.Set(Gf.Quatd(quat.GetReal(), quat.GetImaginary()))
+
+    scale_op = xform.AddScaleOp(precision=precision)
+    scale_op.Set(Gf.Vec3d(1.0, 1.0, 1.0))
+
+
+def _add_static_collider(
+    stage,
+    prim_path: str,
+    size: tuple[float, float, float],
+    color: tuple[float, float, float],
+    scene: SceneConfig,
+    translate: tuple[float, float, float] = (0.0, 0.0, 0.0),
+) -> None:
+    """Add a static (non-rigid) box collider with a visible surface."""
+
+    from pxr import Gf, Sdf, UsdGeom, UsdPhysics
+
+    stage.DefinePrim(prim_path, "Xform")
+    geometry = UsdGeom.Cube.Define(stage, f"{prim_path}/Geometry")
+    geometry.CreateSizeAttr(1.0)
+    xform = UsdGeom.Xformable(geometry.GetPrim())
+    precision = UsdGeom.XformOp.PrecisionDouble
+    xform.AddTranslateOp(precision=precision).Set(Gf.Vec3d(*translate))
+    xform.AddScaleOp(precision=precision).Set(Gf.Vec3d(size[0], size[1], size[2]))
+
+    collision_api = UsdPhysics.CollisionAPI.Apply(geometry.GetPrim())
+    collision_api.CreateSimulationOwnerRel().SetTargets(
+        [Sdf.Path(scene.physics_scene_prim)]
+    )
+    _bind_visual_color(stage, geometry.GetPrim(), color)
+
+
+def _build_procedural_backdrop(stage, scene: SceneConfig) -> None:
+    """Author ground/table/walls/tray from ``scene.procedural``."""
+
+    if scene.procedural is None:
+        return
+    proc = scene.procedural
+
+    stage.DefinePrim(_GENERATED_ROOT, "Xform")
+
+    if proc.build_ground:
+        half = proc.ground_size / 2.0
+        _add_static_collider(
+            stage,
+            f"{scene.world_prim}/Ground",
+            (proc.ground_size, proc.ground_size, 0.1),
+            proc.ground_color,
+            scene,
+            translate=(0.0, 0.0, -0.05),
+        )
+
+    if proc.table:
+        width, length = proc.table_size
+        height = 0.72
+        _add_static_collider(
+            stage,
+            f"{scene.world_prim}/TableTop",
+            (width, length, 0.06),
+            (0.25, 0.55, 0.20),
+            scene,
+            translate=(0.0, 0.0, height),
+        )
+        for index, offset in ((0, -0.62), (1, 0.62)):
+            _add_static_collider(
+                stage,
+                f"{scene.world_prim}/TableLeg_{index}",
+                (0.1, 0.1, height),
+                (0.3, 0.3, 0.32),
+                scene,
+                translate=(0.0, offset, height / 2.0),
+            )
+
+    if proc.walls:
+        half = proc.ground_size / 2.0
+        wall_thickness = 0.1
+        walls = (
+            (f"{scene.world_prim}/Wall_N", (half, wall_thickness), (0, half)),
+            (f"{scene.world_prim}/Wall_S", (half, wall_thickness), (0, -half)),
+            (f"{scene.world_prim}/Wall_E", (wall_thickness, half), (half, 0)),
+            (f"{scene.world_prim}/Wall_W", (wall_thickness, half), (-half, 0)),
+        )
+        for path, (sx, sy), (ox, oy) in walls:
+            _add_static_collider(
+                stage,
+                path,
+                (sx, sy, proc.wall_height),
+                (0.4, 0.4, 0.42),
+                scene,
+                translate=(ox, oy, proc.wall_height / 2.0),
+            )
+
+    if proc.sand_tray:
+        tray_size = 0.5
+        tray_height = 0.35
+        tray_wall = 0.06
+        _add_static_collider(
+            stage,
+            f"{scene.world_prim}/SandTray",
+            (tray_size, tray_size, tray_wall),
+            (0.45, 0.35, 0.25),
+            scene,
+            translate=(0.0, 0.0, tray_height),
+        )
+        half = tray_size / 2.0
+        for index, (dx, dy) in enumerate(((0, 1), (0, -1), (1, 0), (-1, 0))):
+            _add_static_collider(
+                stage,
+                f"{scene.world_prim}/SandTrayWall_{index}",
+                (
+                    tray_size if dx == 0 else tray_wall,
+                    tray_size if dy == 0 else tray_wall,
+                    tray_height,
+                ),
+                (0.45, 0.35, 0.25),
+                scene,
+                translate=(dx * half, dy * half, tray_height / 2.0),
+            )
+
+
+def _define_episode_cameras(stage, episode_spec: EpisodeSpec) -> None:
+    for camera in episode_spec.cameras.values():
+        _define_camera(stage, camera)
+
+
 def build_scene(
     episode_spec: EpisodeSpec,
     scene: SceneConfig,
@@ -377,12 +676,24 @@ def build_scene(
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
+    if output_path.exists():
+        output_path.unlink()
+
+    if episode_spec.template_path is None:
+        root_layer = Sdf.Layer.CreateNew(str(output_path))
+        stage = Usd.Stage.Open(root_layer)
+        stage.DefinePrim(scene.world_prim, "Xform")
+        stage.DefinePrim(scene.physics_scene_prim, "PhysicsScene")
+        _build_procedural_backdrop(stage, scene)
+        _define_episode_cameras(stage, episode_spec)
+        for object_spec in episode_spec.objects:
+            _add_object(stage, object_spec, scene)
+        root_layer.Save()
+        return output_path
+
     template_path = Path(episode_spec.template_path).resolve()
     if not template_path.is_file():
         raise FileNotFoundError(f"Template not found: {template_path}")
-
-    if output_path.exists():
-        output_path.unlink()
 
     root_layer = Sdf.Layer.CreateNew(str(output_path))
     root_layer.subLayerPaths.append(str(template_path))
@@ -401,12 +712,13 @@ def build_scene(
     if prepared_paths:
         _finish_prepared_primitives(stage, scene, prepared_paths)
 
-    if episode_spec.object_mode == "generated_objects":
+    if episode_spec.object_mode in {"generated_objects", "procedural"}:
         _disable_template_dynamics(stage, scene)
 
         stage.DefinePrim(_GENERATED_ROOT, "Xform")
         for object_spec in episode_spec.objects:
-            _add_object(stage, object_spec)
+            _add_object(stage, object_spec, scene)
+        _define_episode_cameras(stage, episode_spec)
     elif episode_spec.object_mode == "replace_assets":
         if prepared_paths:
             print(

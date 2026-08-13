@@ -345,7 +345,32 @@ def create_episode_spec(
     config: RunConfig,
     episode_id: str = "episode_000000",
 ) -> EpisodeSpec:
-    """Sample an :class:`EpisodeSpec` deterministically from ``config``."""
+    """Sample an :class:`EpisodeSpec` deterministically from ``config``.
+
+    When ``config.category`` is set the sampling is delegated to
+    ``phy_data_gen.categories.<category>.create_episode_spec`` so each dataset
+    branch can supply its own deterministatistic sampler without touching the
+    shared pipeline. The default path below keeps the original behavior.
+    """
+
+    if config.category is not None:
+        import importlib
+
+        try:
+            module = importlib.import_module(
+                f"phy_data_gen.categories.{config.category}"
+            )
+        except ModuleNotFoundError as error:
+            raise ModuleNotFoundError(
+                f"Unknown category {config.category!r}: no module "
+                f"phy_data_gen.categories.{config.category}"
+            ) from error
+        selected_template = select_template_path(config)
+        return module.create_episode_spec(
+            config,
+            episode_id=episode_id,
+            template_path=str(selected_template.resolve()),
+        )
 
     rng = random.Random(config.seed)
     selected_template = select_template_path(config)

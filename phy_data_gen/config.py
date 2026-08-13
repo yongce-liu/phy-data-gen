@@ -12,7 +12,21 @@ from typing import Literal
 
 import yaml
 
-ObjectMode = Literal["generated_objects", "template_dynamics", "replace_assets"]
+ObjectMode = Literal["generated_objects", "template_dynamics", "replace_assets", "procedural"]
+
+
+@dataclass(frozen=True)
+class ProceduralConfig:
+    """Backdrop authored from scratch when ``template_path`` is not set."""
+
+    build_ground: bool = True
+    ground_size: float = 8.0
+    ground_color: tuple[float, float, float] = (0.55, 0.55, 0.58)
+    table: bool = False
+    table_size: tuple[float, float] = (2.4, 4.2)
+    walls: bool = False
+    wall_height: float = 0.6
+    sand_tray: bool = False
 
 
 @dataclass(frozen=True)
@@ -31,6 +45,7 @@ class SceneConfig:
     cameras: dict[str, str]
     dynamic_prims: tuple[str, ...]
     replace_initially_moving_objects: bool = True
+    procedural: ProceduralConfig | None = None
 
 
 @dataclass(frozen=True)
@@ -61,6 +76,7 @@ class RunConfig:
     simulation: SimulationConfig
     render: RenderConfig
     template_seed: int | None = None
+    category: str | None = None
 
 
 def load_config(path: Path) -> RunConfig:
@@ -75,8 +91,32 @@ def load_config(path: Path) -> RunConfig:
         "generated_objects",
         "template_dynamics",
         "replace_assets",
+        "procedural",
     }:
         raise ValueError(f"Unsupported scene.object_mode: {object_mode}")
+
+    procedural_raw = scene_raw.get("procedural")
+    procedural = None
+    if procedural_raw:
+        procedural = ProceduralConfig(
+            build_ground=bool(procedural_raw.get("build_ground", True)),
+            ground_size=float(procedural_raw.get("ground_size", 8.0)),
+            ground_color=tuple(
+                float(value)
+                for value in procedural_raw.get(
+                    "ground_color", (0.55, 0.55, 0.58)
+                )
+            ),
+            table=bool(procedural_raw.get("table", False)),
+            table_size=tuple(
+                float(value)
+                for value in procedural_raw.get("table_size", (2.4, 4.2))
+            ),
+            walls=bool(procedural_raw.get("walls", False)),
+            wall_height=float(procedural_raw.get("wall_height", 0.6)),
+            sand_tray=bool(procedural_raw.get("sand_tray", False)),
+        )
+
     scene = SceneConfig(
         name=str(scene_raw["name"]),
         object_mode=object_mode,
@@ -88,6 +128,7 @@ def load_config(path: Path) -> RunConfig:
         replace_initially_moving_objects=bool(
             scene_raw.get("replace_initially_moving_objects", True)
         ),
+        procedural=procedural,
     )
 
     return RunConfig(
@@ -106,4 +147,5 @@ def load_config(path: Path) -> RunConfig:
             if raw.get("template_seed") is not None
             else None
         ),
+        category=str(raw["category"]) if raw.get("category") is not None else None,
     )

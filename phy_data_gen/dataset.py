@@ -10,9 +10,11 @@ from phy_data_gen.recording import StateRecorder
 from phy_data_gen.schemas import EpisodeSpec
 
 
-def default_run_id(scene_name: str, template_path: Path, seed: int) -> str:
+def default_run_id(scene_name: str, template_path: Path | None, seed: int) -> str:
     """Build ``{scene_name}_{scene_hash}_{seed}`` from a template name."""
 
+    if template_path is None:
+        return f"{scene_name}_00000000_{seed}"
     match = re.search(r"_([0-9a-fA-F]{8})_\d+$", template_path.stem)
     scene_hash = match.group(1).lower() if match else "00000000"
     return f"{scene_name}_{scene_hash}_{seed}"

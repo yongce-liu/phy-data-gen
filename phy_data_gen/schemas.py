@@ -8,6 +8,8 @@ handed to a PhysX or (later) Newton runner.
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 from phy_data_gen.config import ObjectMode
@@ -31,6 +33,33 @@ class ObjectSpec(BaseModel):
     scale: float = Field(gt=0.0)
     mass: float = Field(gt=0.0)
     material: PhysicsMaterialSpec
+    kind: Literal["asset", "sphere", "box"] = "asset"
+    # ``radius`` is the sphere radius (m) for ``sphere`` objects, or the
+    # half-extent along every axis for ``box`` objects.
+    radius: float | None = None
+    color: tuple[float, float, float] = (0.6, 0.6, 0.6)
+    # Initial body velocities, authored as physics:velocity /
+    # physics:angularVelocity on the rigid-body prim (m/s, rad/s).
+    initial_linear_velocity: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    initial_angular_velocity: tuple[float, float, float] = (0.0, 0.0, 0.0)
+    # ``record=False`` objects are simulated but never get per-object state
+    # views (e.g. hundreds of sand grains or static container walls).
+    record: bool = True
+    # ``dynamic=False`` objects carry collision but no rigid body (static
+    # obstacles, container walls, fixed objects for category 03).
+    dynamic: bool = True
+
+
+class CameraSpec(BaseModel):
+    """A camera to author into the episode scene."""
+
+    prim_path: str
+    position: tuple[float, float, float]
+    look_at: tuple[float, float, float] | None = None
+    orientation_xyzw: tuple[float, float, float, float] | None = None
+    focal_length: float = 24.0
+    horizontal_aperture: float = 20.955
+    vertical_aperture: float = 11.79
 
 
 class AssetReplacementSpec(BaseModel):
@@ -50,7 +79,7 @@ class EpisodeSpec(BaseModel):
 
     episode_id: str
     seed: int
-    template_path: str
+    template_path: str | None = None
     backend: str
     object_mode: ObjectMode
     duration_seconds: float = Field(gt=0.0)
@@ -58,3 +87,7 @@ class EpisodeSpec(BaseModel):
     render_fps: int = Field(gt=0)
     objects: list[ObjectSpec]
     replacements: list[AssetReplacementSpec] = Field(default_factory=list)
+    cameras: dict[str, CameraSpec] = Field(default_factory=dict)
+    # ``runner`` selects the simulation backend path. Only "rigid" exists on
+    # dev; category 08 supplies "deformable" in phy_data_gen/runners/.
+    runner: Literal["rigid", "deformable"] = "rigid"
