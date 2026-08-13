@@ -258,6 +258,20 @@ def run_simulation(
 
     sim.reset()
 
+    # SimulationContext._initialize_physics_scene() deletes and recreates the
+    # physics scene, wiping the GPU-dynamics flag. Re-assert it after the
+    # context is live but before the timeline plays, via the omni.physx
+    # interface so PhysX picks it up before stepping.
+    try:
+        from omni.physx import get_physx_interface
+        from omni.physx.bindings import _physx
+
+        physx_interface = get_physx_interface()
+        physx_interface.enableGpuDynamics(True)
+        physx_interface.enableGpuDynamicsPersistentCache(True)
+    except Exception:
+        pass  # interface differences; the USD attr is a fallback
+
     records: list[dict] = []
     deformable_records: list[dict] = []
     frame_index = 0
