@@ -100,6 +100,7 @@ def box_spec(
     color: tuple[float, float, float] = (0.5, 0.4, 0.3),
     record: bool = True,
     dynamic: bool = True,
+    half_extents: tuple[float, float, float] | None = None,
 ) -> ObjectSpec:
     return ObjectSpec(
         object_id=object_id,
@@ -114,6 +115,7 @@ def box_spec(
         color=color,
         record=record,
         dynamic=dynamic,
+        half_extents=half_extents,
     )
 
 
@@ -155,6 +157,7 @@ def build_episode(
     duration_seconds: float | None = None,
     physics_dt: float | None = None,
     runner: str = "rigid",
+    metadata: dict[str, object] | None = None,
 ) -> EpisodeSpec:
     """Assemble an EpisodeSpec for a category episode."""
 
@@ -170,6 +173,7 @@ def build_episode(
         objects=objects,
         cameras=cameras,
         runner=runner,
+        metadata=metadata or {},
     )
 
 

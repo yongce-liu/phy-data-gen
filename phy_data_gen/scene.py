@@ -244,7 +244,18 @@ def _add_primitive_object(
         geometry.CreateRadiusAttr(radius)
     else:
         geometry = UsdGeom.Cube.Define(stage, geometry_path)
-        geometry.CreateSizeAttr(2.0 * radius)
+        if object_spec.half_extents is not None:
+            # Per-axis box: unit cube scaled by 2*half_extents.
+            geometry.CreateSizeAttr(1.0)
+            from pxr import Gf
+
+            ext = object_spec.half_extents
+            geo_xform = UsdGeom.Xformable(geometry.GetPrim())
+            geo_xform.AddScaleOp(
+                precision=UsdGeom.XformOp.PrecisionDouble
+            ).Set(Gf.Vec3d(2.0 * ext[0], 2.0 * ext[1], 2.0 * ext[2]))
+        else:
+            geometry.CreateSizeAttr(2.0 * radius)
 
     collision_api = UsdPhysics.CollisionAPI.Apply(geometry.GetPrim())
     collision_api.CreateSimulationOwnerRel().SetTargets(
@@ -675,6 +686,23 @@ def _define_episode_cameras(stage, episode_spec: EpisodeSpec) -> None:
         _define_camera(stage, camera)
 
 
+def _apply_runner_scene_hook(stage, episode_spec: EpisodeSpec, scene: SceneConfig) -> None:
+    """Let a non-rigid runner author its own scene extensions.
+
+    Category 08's deformable runner uses this to build soft-ball meshes after
+    the generic object placement. Hook functions must be pure pxr (no runtime).
+    """
+
+    if episode_spec.runner == "rigid":
+        return
+    import importlib
+
+    module = importlib.import_module(f"phy_data_gen.runners.{episode_spec.runner}")
+    hook = getattr(module, "build_scene_hook", None)
+    if hook is not None:
+        hook(stage, episode_spec, scene)
+
+
 def build_scene(
     episode_spec: EpisodeSpec,
     scene: SceneConfig,
@@ -698,6 +726,7 @@ def build_scene(
         _define_episode_cameras(stage, episode_spec)
         for object_spec in episode_spec.objects:
             _add_object(stage, object_spec, scene)
+        _apply_runner_scene_hook(stage, episode_spec, scene)
         root_layer.Save()
         return output_path
 
@@ -732,6 +761,7 @@ def build_scene(
         for object_spec in episode_spec.objects:
             _add_object(stage, object_spec, scene)
         _define_episode_cameras(stage, episode_spec)
+        _apply_runner_scene_hook(stage, episode_spec, scene)
     elif episode_spec.object_mode == "replace_assets":
         if prepared_paths:
             print(
