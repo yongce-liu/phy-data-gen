@@ -323,9 +323,15 @@ def main() -> int:
                 output_root=output_root,
                 run_id=run_id,
             )
+            is_cat01 = bool(spec.metadata.get("variant"))
             summary = validate_episode(
                 result.states.records,
                 require_fall=spec.object_mode == "generated_objects",
+                # Category 01 is two-ball collision: require an actual
+                # contact and a readable approach phase (>=6 frames, i.e.
+                # >=0.2 s, of pre-collision motion).
+                require_contact=is_cat01,
+                min_approach_frames=6 if is_cat01 else None,
             )
             save_validation(summary, physics_dir / "validation.json")
             t2 = time.perf_counter()

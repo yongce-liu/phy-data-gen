@@ -11,7 +11,9 @@ output_root: outputs/category_01
 
 backend: physx
 seed: 42
-template_seed: 42
+# Leave template_seed unset so each episode picks a *different* Cosmos
+# billiards template — each carries a different dome environment + table
+# finish, which is the main background-diversity lever.
 num_objects: 0
 
 scene:

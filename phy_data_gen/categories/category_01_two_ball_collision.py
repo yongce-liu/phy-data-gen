@@ -53,7 +53,6 @@ def _sample_scenario(rng: random.Random, variant: str) -> dict:
     r1 = rng.uniform(0.03, 0.05)
     r2 = rng.uniform(0.03, 0.05)
     sum_r = r1 + r2
-    gap = sum_r * rng.uniform(0.15, 0.5)  # initial separation along travel axis
 
     # Impact parameter in units of sum_r.
     if variant == "head_on":
@@ -65,7 +64,10 @@ def _sample_scenario(rng: random.Random, variant: str) -> dict:
     else:
         b = 0.0
 
-    speed = rng.uniform(0.5, 8.0)
+    # How long the approach (pre-collision motion) should stay on screen.
+    # 0.9-1.8 s of run-up at 30 fps is 27-54 clearly readable frames of
+    # ball-motion before contact — the phase the user asked to see.
+    approach_time = rng.uniform(0.9, 1.8)
 
     # Mass ratio and motion mode.
     ratio = rng.choice([1.0, 2.0, 5.0, 10.0])
@@ -78,63 +80,90 @@ def _sample_scenario(rng: random.Random, variant: str) -> dict:
 
     # Elasticity.
     e = rng.choice([0.0, 0.3, 0.7, 1.0])
-    restitution = e if variant != "head_on" else e
 
     spin1 = rng.uniform(-50.0, 50.0) if rng.random() < 0.5 else 0.0
-    spin2 = 0.0
 
     return {
         "r1": r1,
         "r2": r2,
         "b": b,
-        "gap": gap,
-        "speed": speed,
+        "approach_time": approach_time,
         "m1": m1,
         "m2": m2,
-        "restitution": restitution,
+        "restitution": e,
         "spin1": spin1,
-        "spin2": spin2,
+        "spin2": 0.0,
     }
 
 
 def _place_balls(scenario: dict, variant: str, rng: random.Random):
     """Return (pos1, pos2, vel1, vel2, spin1) for the scenario.
 
-    The collision happens at the origin after a visible approach: ball_a
-    starts far away (0.5-1.2 m) and travels in, so the video shows the run-up
-    before contact. ball_b sits at (b, 0, r2) — the impact-parameter offset —
-    so the collision point is the origin.
+    The collision happens at the origin.  Instead of sampling an arbitrary
+    speed and letting the balls reach each other in a frame or two, the
+    approach distance and the target run-up time are sampled directly, and
+    the speed is *derived* from them — so every episode shows a clear
+    pre-contact motion phase of roughly ``approach_time`` seconds.
+
+    Positions are kept inside a ~0.9 m radius of the table centre: Cosmos
+    billiards tables differ in size (the smallest sampled x half-extent is
+    ~1.28 m) and the bumpers sit on top, so a ball spawned beyond ~1.0 m can
+    start over the rail or fall through a thin edge.  The collision point is
+    still the origin.
     """
 
     r1 = scenario["r1"]
     r2 = scenario["r2"]
     b = scenario["b"]
-    speed = scenario["speed"]
     s1 = scenario["spin1"]
-    approach = rng.uniform(0.5, 1.2)  # visible run-up distance (m)
+    t_approach = scenario["approach_time"]
+    # Start positions stay within this radius of the origin so every ball is
+    # solidly on the playing surface regardless of the template's table size.
+    max_radius = 0.9
 
-    # Ball 1 travels along +Y toward ball 2 at the origin (offset by b).
-    pos2 = (b, 0.0, r2)
-    pos1 = (0.0, -approach, r1)
-    vel1 = (0.0, speed, 0.0)
-    vel2 = (0.0, 0.0, 0.0)
-
-    if variant == "head_on_towards":
-        # Both moving head-on, collide at the origin.
-        pos2 = (0.0, approach * 0.4, r2)
-        vel2 = (0.0, -speed * 0.5, 0.0)
-        vel1 = (0.0, speed, 0.0)
+    if variant in ("head_on", "oblique", "eccentric"):
+        # Ball a travels along +Y from y=-D into ball b parked at the
+        # impact-parameter offset; contact at the origin.
+        D = rng.uniform(0.5, max_radius)
+        pos1 = (0.0, -D, r1)
+        pos2 = (b, 0.0, r2)
+        sep = D - (r1 + r2)
+        rel = max(sep / t_approach, 0.3)
+        vel1 = (0.0, rel, 0.0)
+        vel2 = (0.0, 0.0, 0.0)
+    elif variant == "head_on_towards":
+        # Both balls moving head-on, meet at the origin.
+        D = rng.uniform(0.5, max_radius)
+        pos1 = (0.0, -D, r1)
+        pos2 = (0.0, D * 0.4, r2)
+        sep = (D + D * 0.4) - (r1 + r2)
+        rel = max(sep / t_approach, 0.3)
+        vel1 = (0.0, rel * 0.67, 0.0)
+        vel2 = (0.0, -rel * 0.33, 0.0)
     elif variant == "rear_end":
         # Catch-up: ball 2 ahead moving slower, ball 1 behind moving faster.
-        pos2 = (b, approach * 0.3, r2)
-        vel2 = (0.0, speed * rng.uniform(0.2, 0.6), 0.0)
-        vel1 = (0.0, speed, 0.0)
+        D = rng.uniform(0.5, max_radius)
+        pos1 = (0.0, -D, r1)
+        pos2 = (b, D * 0.4, r2)
+        sep = (D + D * 0.4) - (r1 + r2)
+        # The chaser catches up at (v1 - v2) = rel; sample the lead speed as
+        # a fraction of rel so the full approach still takes t_approach.
+        rel = max(sep / t_approach, 0.3)
+        lead_frac = rng.uniform(0.25, 0.5)
+        lead_speed = rel * lead_frac / (1.0 - lead_frac)
+        vel2 = (0.0, lead_speed, 0.0)
+        vel1 = (0.0, rel + lead_speed, 0.0)
     elif variant == "both_moving":
         # Ball 1 moves along +X, ball 2 along -X, collide at the origin.
-        pos1 = (-approach, 0.0, r1)
-        pos2 = (approach * 0.3, 0.0, r2)
-        vel1 = (speed, 0.0, 0.0)
-        vel2 = (-speed * 0.5, 0.0, 0.0)
+        D = rng.uniform(0.5, max_radius)
+        pos1 = (-D, 0.0, r1)
+        pos2 = (D * 0.4, 0.0, r2)
+        sep = (D + D * 0.4) - (r1 + r2)
+        rel = max(sep / t_approach, 0.3)
+        vel1 = (rel * 0.67, 0.0, 0.0)
+        vel2 = (-rel * 0.33, 0.0, 0.0)
+    else:
+        raise ValueError(f"unknown variant: {variant}")
 
     return pos1, pos2, vel1, vel2, s1
 
@@ -177,12 +206,24 @@ def create_episode_spec(
         ),
     ]
 
+    meta = {
+        "variant": variant,
+        "restitution": scenario["restitution"],
+        "mass_ratio": scenario["m2"] / scenario["m1"],
+        "impact_parameter_m": scenario["b"],
+        "approach_time_s": scenario["approach_time"],
+        "spin_rad_s": s1,
+        "initial_positions": [list(pos1), list(pos2)],
+        "initial_velocities": [list(vel1), list(vel2)],
+    }
+
     return build_episode(
         config,
         episode_id,
         template_path,
         balls,
         jittered_cameras(_TABLE_CENTER, rng),
+        metadata=meta,
     )
 
 

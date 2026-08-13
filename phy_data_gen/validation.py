@@ -31,8 +31,21 @@ def _speed(velocity) -> float:
     return math.sqrt(sum(float(v) * float(v) for v in velocity))
 
 
-def validate_episode(records: list[dict], require_fall: bool = True) -> dict:
-    """Validate per-frame state records and return a summary dict."""
+def validate_episode(
+    records: list[dict],
+    require_fall: bool = True,
+    require_contact: bool = False,
+    min_approach_frames: int | None = None,
+) -> dict:
+    """Validate per-frame state records and return a summary dict.
+
+    Basic checks are always run (finite, moved, fell, max speed).  When
+    ``require_contact`` is set it also verifies that two recorded dynamic
+    objects actually touch at some frame; ``min_approach_frames`` additionally
+    requires the contact to happen at least that many frames after the start
+    (the visible run-up phase).  Both are opt-in so other categories that
+    legitimately never collide are not rejected.
+    """
 
     if not records:
         return {
@@ -82,7 +95,44 @@ def validate_episode(records: list[dict], require_fall: bool = True) -> dict:
             break
 
     max_speed_ok = max_speed < _MAX_SPEED
-    passed = finite and moved and (fell or not require_fall) and max_speed_ok
+
+    # Contact check (opt-in): any two distinct recorded objects whose
+    # centres come within 12 cm of each other.
+    contact_frame = None
+    if require_contact:
+        by_obj: dict[str, list[dict]] = defaultdict(list)
+        for record in records:
+            by_obj[record["object_id"]].append(record)
+        dynamic = {oid: recs for oid, recs in by_obj.items()}
+        items = list(dynamic.items())
+        for i, (oid_a, recs_a) in enumerate(items):
+            for oid_b, recs_b in items[i + 1 :]:
+                n = min(len(recs_a), len(recs_b))
+                for k in range(n):
+                    pa, pb = recs_a[k]["position"], recs_b[k]["position"]
+                    d2 = sum((x - y) ** 2 for x, y in zip(pa, pb))
+                    if d2 <= (0.12 ** 2):
+                        contact_frame = recs_a[k]["frame"]
+                        break
+                if contact_frame is not None:
+                    break
+            if contact_frame is not None:
+                break
+
+    has_contact = contact_frame is not None
+    approach_ok = (
+        contact_frame is None or min_approach_frames is None
+        or contact_frame >= min_approach_frames
+    )
+
+    passed = (
+        finite
+        and moved
+        and (fell or not require_fall)
+        and max_speed_ok
+        and (not require_contact or has_contact)
+        and approach_ok
+    )
 
     return {
         "finite": bool(finite),
@@ -90,6 +140,9 @@ def validate_episode(records: list[dict], require_fall: bool = True) -> dict:
         "fell": bool(fell),
         "max_speed_ok": bool(max_speed_ok),
         "max_speed": float(max_speed),
+        "contact_frame": contact_frame,
+        "has_contact": bool(has_contact),
+        "approach_ok": bool(approach_ok),
         "passed": bool(passed),
     }
 
