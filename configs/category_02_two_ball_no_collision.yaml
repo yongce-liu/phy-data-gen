@@ -1,6 +1,6 @@
 # Category 02 — two-ball no-collision motion (parallel / cross / same-direction
 # different speeds / offset head-on / different release times). Billiards table
-# backdrop, template balls removed, procedural camera ring.
+# Each episode picks a different Cosmos template -> different dome environment + table finish (background diversity).
 
 category: category_02_two_ball_no_collision
 
@@ -11,7 +11,6 @@ output_root: outputs/category_02
 
 backend: physx
 seed: 42
-template_seed: 42
 num_objects: 0
 
 scene:
