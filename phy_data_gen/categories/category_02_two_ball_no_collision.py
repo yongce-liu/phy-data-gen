@@ -73,7 +73,7 @@ def _place_balls(scenario: dict, variant: str, rng: random.Random):
         # Cross at the origin; ball1 along +Y, ball2 along +X, large miss.
         angle = rng.uniform(math.radians(30), math.radians(90))
         pos1 = (0.0, -0.6, r1)
-        vel2 = (v * math.cos(angle), v * math.sin(angle), 0.0)
+        vel1 = (0.0, v, 0.0)
         # Ensure miss: offset trajectories by > sum_r in the cross direction.
         miss_offset = miss * 1.2
         pos2 = (-0.6, miss_offset, r2)
