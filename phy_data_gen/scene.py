@@ -39,6 +39,55 @@ def xyzw_to_gf_quat(value: tuple[float, float, float, float]):
     return Gf.Quatd(w, Gf.Vec3d(x, y, z))
 
 
+def quat_from_rotation_matrix(basis) -> tuple[float, float, float, float]:
+    """Return the (x, y, z, w) quaternion for an orthonormal right-handed
+    rotation matrix.
+
+    ``basis[i][j]`` is row *i*, column *j* (pxr convention) and the matrix's
+    columns are the rotated local frame.  This implements the standard
+    Shepperd algorithm in the *standard* quaternion convention — i.e. the
+    returned quaternion satisfies ``R(q) * e_i = column_i`` for the usual
+    quaternion-to-matrix formula.
+
+    We deliberately do **not** use ``Gf.Matrix3d.ExtractRotation()``: pxr's
+    extraction returns the quaternion of the *inverse* rotation for
+    non-axis-aligned frames, which would aim every camera at the wrong place.
+    """
+
+    import math
+
+    r00, r01, r02 = basis[0][0], basis[0][1], basis[0][2]
+    r10, r11, r12 = basis[1][0], basis[1][1], basis[1][2]
+    r20, r21, r22 = basis[2][0], basis[2][1], basis[2][2]
+
+    trace = r00 + r11 + r22
+    if trace > 0:
+        s = 2.0 * math.sqrt(trace + 1.0)
+        w = 0.25 * s
+        x = (r21 - r12) / s
+        y = (r02 - r20) / s
+        z = (r10 - r01) / s
+    elif r00 > r11 and r00 > r22:
+        s = 2.0 * math.sqrt(max(0.0, 1.0 + r00 - r11 - r22))
+        w = (r21 - r12) / s
+        x = 0.25 * s
+        y = (r10 + r01) / s
+        z = (r20 + r02) / s
+    elif r11 > r22:
+        s = 2.0 * math.sqrt(max(0.0, 1.0 + r11 - r00 - r22))
+        w = (r02 - r20) / s
+        x = (r10 + r01) / s
+        y = 0.25 * s
+        z = (r21 + r12) / s
+    else:
+        s = 2.0 * math.sqrt(max(0.0, 1.0 + r22 - r00 - r11))
+        w = (r10 - r01) / s
+        x = (r20 + r02) / s
+        y = (r21 + r12) / s
+        z = 0.25 * s
+    return (x, y, z, w)
+
+
 def _disable_template_dynamics(stage, scene: SceneConfig) -> None:
     """Deactivate the template's dynamic props via override prims."""
 
@@ -547,20 +596,30 @@ def _define_camera(stage, camera: CameraSpec) -> None:
         position = Gf.Vec3d(*camera.position)
         target = Gf.Vec3d(*camera.look_at)
         forward = (target - position).GetNormalized()
-        # Build the camera-to-world basis: local X = right, local Y = up,
-        # local Z = -forward (USD cameras look down their -Z axis).
+        # Build a right-handed camera-to-world basis (det +1): local X =
+        # right, local Y = up, local Z = -forward (USD cameras look down
+        # their -Z axis).  Note right = forward x world_up, NOT
+        # world_up x forward — the latter is left-handed and makes
+        # Gf.Matrix3d.ExtractRotation() return a garbage quaternion.
         world_up = Gf.Vec3d(0, 0, 1)
-        right = world_up.GetCross(forward).GetNormalized()
-        up = forward.GetCross(right)
+        if abs(forward.GetDot(world_up)) > 0.99:
+            # Camera looks straight up/down: pick a world_up that is not
+            # parallel so the right vector stays well-defined.
+            world_up = Gf.Vec3d(1, 0, 0)
+        right = forward.GetCross(world_up).GetNormalized()
+        up = right.GetCross(forward)
         basis = Gf.Matrix3d(1)
         basis.SetColumn(0, right)
         basis.SetColumn(1, up)
         basis.SetColumn(2, -forward)
-        # Extract the quaternion from the basis and use it directly via an
-        # orient op (double precision), matching the Cosmos camera convention.
-        quat = basis.ExtractRotation().GetQuat()
+        # Convert the basis to a quaternion with the standard convention
+        # (see quat_from_rotation_matrix — pxr's ExtractRotation is wrong
+        # here).  pxr's xformOp:orient applies the *inverse* of
+        # Gf.Rotation(quat) to a point, so the conjugate must be authored for
+        # the world frame to end up with the intended camera-to-world basis.
+        x, y, z, w = quat_from_rotation_matrix(basis)
         orient_op = xform.AddOrientOp(precision=precision)
-        orient_op.Set(Gf.Quatd(quat.GetReal(), quat.GetImaginary()))
+        orient_op.Set(Gf.Quatd(w, Gf.Vec3d(-x, -y, -z)))
 
     scale_op = xform.AddScaleOp(precision=precision)
     scale_op.Set(Gf.Vec3d(1.0, 1.0, 1.0))
