@@ -41,15 +41,28 @@ def find_usd_files(root: Path) -> list[Path]:
     Uses ``os.walk(followlinks=True)`` so symlinked asset directories (the
     MolmoSpaces layout links ``objects/thor`` into ``.molmospaces``) are
     traversed as well; ``Path.rglob`` does not descend into symlinks.
+
+    Cached by root path: the template root is scanned once per process and the
+    result reused across episodes in a batch.
     """
 
-    import os
+    return _find_usd_files_impl(str(root.resolve()))
 
+
+import functools as _functools
+
+
+@_functools.lru_cache(maxsize=None)
+def _find_usd_files_impl(root_str: str) -> list[Path]:
+    import os
+    from pathlib import Path as _Path
+
+    root = _Path(root_str)
     matches: list[Path] = []
     for dirpath, _dirnames, filenames in os.walk(root, followlinks=True):
         for name in filenames:
-            if Path(name).suffix.lower() in _USD_SUFFIXES:
-                matches.append(Path(dirpath) / name)
+            if _Path(name).suffix.lower() in _USD_SUFFIXES:
+                matches.append(_Path(dirpath) / name)
     return sorted(matches)
 
 

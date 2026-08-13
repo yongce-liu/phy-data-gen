@@ -50,6 +50,57 @@ class HighThroughputArgs:
     resume: bool = False
     seed_start: int | None = None
     rendering_mode: str = "balanced"
+    rgb_encoder: str | None = None  # override config; "libx264" avoids NVENC cap
+
+
+def _nvenc_available(rgb_encoder: str, device_index: int = 0) -> bool:
+    """Return whether a fresh NVENC encoder session can open right now.
+
+    Consumer NVIDIA drivers cap concurrent NVENC sessions (8 on RTX 50-series).
+    When another process (e.g. an offline render) holds all sessions, a new
+    encoder fails at startup and the writer deadlocks on the full pipe. Probe
+    by opening one real encoder; fall back to libx264 on failure.
+    """
+
+    if rgb_encoder != "h264_nvenc":
+        return True
+
+    import subprocess
+    import tempfile
+
+    probe_dir = Path(tempfile.mkdtemp(prefix="nvenc_probe_"))
+    src = probe_dir / "src.mp4"
+    try:
+        subprocess.run(
+            [
+                "ffmpeg", "-loglevel", "error", "-y",
+                "-f", "lavfi",
+                "-i", "testsrc=duration=1:size=128x128:rate=10",
+                "-frames:v", "2", "-c:v", "libx264", str(src),
+            ],
+            check=True,
+            capture_output=True,
+        )
+        proc = subprocess.Popen(
+            [
+                "ffmpeg", "-loglevel", "error", "-y",
+                "-i", str(src),
+                "-c:v", "h264_nvenc", "-preset", "p4", "-tune", "hq",
+                "-rc", "vbr", "-cq", "18", "-b:v", "0",
+                "-gpu", str(device_index),
+                str(probe_dir / "out.mp4"),
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        ok = proc.wait(timeout=30) == 0
+    except Exception:
+        ok = False
+    finally:
+        for path in probe_dir.iterdir():
+            path.unlink(missing_ok=True)
+        probe_dir.rmdir()
+    return ok
 
 
 def _find_last_episode(output_root: Path, min_seed: int) -> int:
@@ -119,6 +170,24 @@ def main() -> int:
     output_root = Path(base_config["output_root"])
     config_seed = int(base_config["seed"])
     seed = args.seed_start if args.seed_start is not None else config_seed
+
+    # NVENC fallback: if the configured encoder is h264_nvenc but the GPU's
+    # NVENC session cap is already exhausted (e.g. a concurrent offline render),
+    # fall back to CPU libx264 so generation proceeds without deadlocking.
+    configured_encoder = str(base_config.get("render", {}).get("rgb_encoder", "h264_nvenc"))
+    effective_encoder = args.rgb_encoder or configured_encoder
+    if effective_encoder == "h264_nvenc":
+        gpu_index = int(args.device.split(":")[-1]) if ":" in args.device else 0
+        if not _nvenc_available(effective_encoder, gpu_index):
+            print(
+                f"{tag} NVENC session cap exhausted; falling back to libx264 "
+                "(CPU encoding) to avoid encoder deadlock",
+                flush=True,
+            )
+            effective_encoder = "libx264"
+    if effective_encoder != configured_encoder:
+        base_config.setdefault("render", {})["rgb_encoder"] = effective_encoder
+        print(f"{tag} Using rgb_encoder={effective_encoder}", flush=True)
 
     # Resume support.
     if args.resume:
