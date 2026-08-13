@@ -201,6 +201,16 @@ def _apply_physics(stage, prim, object_spec: ObjectSpec) -> None:
             f"{object_spec.asset_path}"
         )
 
+    if not object_spec.dynamic:
+        # Static object: keep collision but drop any rigid body so PhysX
+        # treats it as a fixed obstacle.
+        for rigid in rigid_prims:
+            rigid.RemoveAPI(UsdPhysics.RigidBodyAPI)
+            if rigid.HasAPI(UsdPhysics.MassAPI):
+                rigid.RemoveAPI(UsdPhysics.MassAPI)
+        _bind_physics_material(stage, prim, object_spec)
+        return
+
     rigid_prim = rigid_prims[0] if rigid_prims else prim
     if not rigid_prims:
         UsdPhysics.RigidBodyAPI.Apply(rigid_prim)
