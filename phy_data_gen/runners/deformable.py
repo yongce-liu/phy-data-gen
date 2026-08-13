@@ -14,26 +14,12 @@ from __future__ import annotations
 
 import json
 import math
-import sys
 from pathlib import Path
 
 import numpy as np
 
 from phy_data_gen.config import SceneConfig
 from phy_data_gen.schemas import EpisodeSpec
-
-# ``isaacsim.core.experimental.prims`` (DeformablePrim) and its dependencies
-# (isaacsim.core.experimental.utils, isaacsim.core.simulation_manager, …) ship
-# as pip extensions under isaacsim/exts/ and are not on sys.path unless each
-# extension is enabled. The Isaac runtime launches from the venv, so add every
-# ``isaacsim.core.*`` ext dir to the path so the imports resolve inside
-# run_simulation.
-_ISAACSIM_ROOT = Path(__file__).resolve().parents[3]  # .../site-packages/isaacsim
-_EXTS = _ISAACSIM_ROOT / "exts"
-for _ext_dir in sorted(_EXTS.iterdir()) if _EXTS.is_dir() else []:
-    _pkg = _ext_dir / "isaacsim"
-    if (_pkg / "core").is_dir() and str(_ext_dir) not in sys.path:
-        sys.path.insert(0, str(_ext_dir))
 
 
 def _uv_sphere_mesh(stage, prim_path: str, radius: float, segments: int = 24, rings: int = 14):
@@ -212,9 +198,24 @@ def run_simulation(
 
     sim = SimulationContext(SimulationCfg(dt=episode_spec.physics_dt))
 
-    from isaacsim.core.experimental.prims import DeformablePrim
+    # Read the deformable mesh points directly from the USD stage each frame
+    # instead of using isaacsim.core.experimental.prims.DeformablePrim, whose
+    # pip extension is not importable in this venv/runtime.  The volume
+    # deformable schema updates the mesh's points in place during stepping.
+    from pxr import UsdGeom
 
-    deformables = DeformablePrim(deformable_paths, deformable_type="volume")
+    mesh_paths = [
+        f"/World/GeneratedObjects/{obj.object_id}/Geometry"
+        for obj in episode_spec.objects
+    ]
+    mesh_prims = [
+        stage.GetPrimAtPath(p)
+        for p in mesh_paths
+        if stage.GetPrimAtPath(p).IsValid() and stage.GetPrimAtPath(p).IsA(UsdGeom.Mesh)
+    ]
+    if not mesh_prims:
+        raise RuntimeError("No deformable mesh prims found in stage")
+    mesh_objects = [UsdGeom.Mesh(prim) for prim in mesh_prims]
 
     frame_recorder = None
     if capture_frames:
@@ -251,8 +252,15 @@ def run_simulation(
             sim.step(render=False)
             if step % capture_every == 0:
                 timestamp = step * episode_spec.physics_dt
-                sim_pos, _coll_pos, _rest_pos = deformables.get_nodal_positions()
-                sim_np = np.asarray(sim_pos).reshape(-1, 3)
+                # Combine points across all soft-ball meshes (usually one).
+                all_points = []
+                for mesh_obj in mesh_objects:
+                    pts = mesh_obj.GetPointsAttr().Get()
+                    if pts is not None:
+                        all_points.extend((p[0], p[1], p[2]) for p in pts)
+                sim_np = np.asarray(all_points, dtype=np.float64).reshape(-1, 3)
+                if sim_np.size == 0:
+                    sim_np = np.zeros((1, 3), dtype=np.float64)
                 center = sim_np.mean(axis=0)
                 radii = np.linalg.norm(sim_np - center, axis=1)
                 records.append(
