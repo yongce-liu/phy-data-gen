@@ -7,10 +7,6 @@
 
 def Xform "World"
 {
-    def PhysicsScene "PhysicsScene"
-    {
-    }
-
     def Xform "Ground"
     {
         def Cube "Geometry" (
@@ -19,9 +15,19 @@ def Xform "World"
         {
             float3[] extent = [(-0.5, -0.5, -0.5), (0.5, 0.5, 0.5)]
             rel physics:simulationOwner = </PhysicsScene>
-            float3[] xformOp:translate = (0, 0, -0.05)
-            float3[] xformOp:scale = (4, 4, 0.1)
+            float3 xformOp:translate = (0, 0, -0.05)
+            float3 xformOp:scale = (4, 4, 0.1)
             uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
         }
     }
+}
+
+# Top-level PhysicsScene, matching the Cosmos billiards templates and the
+# category configs' physics_scene_prim = /PhysicsScene. GPU dynamics must be
+# enabled for the deformable (soft-body) runner (category 08).
+def PhysicsScene "PhysicsScene"
+{
+    bool physxScene:enableCCD = 1
+    bool physxScene:enableGPUDynamics = 1
+    uint physxScene:timeStepsPerSecond = 120
 }

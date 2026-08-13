@@ -329,6 +329,21 @@ def run_simulation(
     # Mirrors the rigid runner's SimulationResult surface for the caller.
     from dataclasses import dataclass, field
 
+    class _DeformableStates:
+        """Minimal object exposing the rigid runner's ``states`` surface.
+
+        The deformable runner records its own deformable_states/nodes JSONL,
+        so the caller's ``states.save`` / ``states.records`` calls must not
+        crash — expose a no-op save and an empty records list (the deformable
+        records are already persisted separately).
+        """
+
+        def __init__(self, records):
+            self.records = records
+
+        def save(self, path):
+            pass
+
     @dataclass
     class DeformableResult:
         states: object
@@ -342,7 +357,7 @@ def run_simulation(
         deformable_records: list = field(default_factory=list)
 
     return DeformableResult(
-        states=None,
+        states=_DeformableStates(records),
         num_physics_steps=num_physics_steps,
         captured_frames=frame_index,
         object_ids=deformable_paths,

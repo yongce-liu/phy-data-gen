@@ -314,19 +314,25 @@ def main() -> int:
             physics_dir = output_root / "physics" / run_id
             result.states.save(physics_dir / "object_states.jsonl")
             save_camera_metadata(result.camera_metadata, output_root, run_id)
-            save_physics_annotations(
-                recorder=result.states,
-                episode_spec=spec,
-                object_ids=result.object_ids,
-                object_paths=result.object_paths,
-                camera_names=list(scene_cfg.cameras),
-                output_root=output_root,
-                run_id=run_id,
-            )
-            summary = validate_episode(
-                result.states.records,
-                require_fall=spec.object_mode == "generated_objects",
-            )
+            if spec.runner == "rigid":
+                # Rigid runner: per-camera velocity/spin/com NPZ + validation.
+                save_physics_annotations(
+                    recorder=result.states,
+                    episode_spec=spec,
+                    object_ids=result.object_ids,
+                    object_paths=result.object_paths,
+                    camera_names=list(scene_cfg.cameras),
+                    output_root=output_root,
+                    run_id=run_id,
+                )
+                summary = validate_episode(
+                    result.states.records,
+                    require_fall=spec.object_mode == "generated_objects",
+                )
+            else:
+                # Deformable runner (category 08) writes its own
+                # deformable_states/nodes JSONL + validation inside the runner.
+                summary = {}
             save_validation(summary, physics_dir / "validation.json")
             t2 = time.perf_counter()
 
