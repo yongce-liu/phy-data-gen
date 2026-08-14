@@ -65,7 +65,14 @@ def _make_balls(
                     color=(0.8, 0.1, 0.1),
                 )
             )
-        balls[0].initial_linear_velocity = (0.0, rng.uniform(2.0, 6.0), 0.0)
+        # ``ball_0`` is the incoming striker. The resting row runs down -Y
+        # (ball_1..ball_{n-1}), so the striker must start *above* the row
+        # (positive Y) with a visible approach and roll *toward* it (-Y).
+        # The old code gave ball_0 a +Y velocity, sending it away from the
+        # row so no chain reaction ever happened.
+        approach = rng.uniform(0.30, 0.55)
+        balls[0].position = (0.0, approach, r)
+        balls[0].initial_linear_velocity = (0.0, -rng.uniform(2.0, 6.0), 0.0)
         return balls
 
     if variant == "random_2d":

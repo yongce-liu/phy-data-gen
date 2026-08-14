@@ -774,6 +774,99 @@ def _add_invisible_ground(stage, scene: SceneConfig, height: float = -0.6) -> No
     # No material binding → the cube renders nothing (invisible collider).
 
 
+def _bind_collider_physics_material(
+    stage,
+    prim_path: str,
+    restitution: float,
+    static_friction: float = 0.4,
+    dynamic_friction: float = 0.3,
+) -> None:
+    """Bind a physics-only material (no visual shader) to a collider prim."""
+
+    from pxr import UsdPhysics, UsdShade
+
+    material_path = f"{prim_path}/BumperPhysicsMaterial"
+    material_prim = stage.DefinePrim(material_path, "Material")
+    material_api = UsdPhysics.MaterialAPI.Apply(material_prim)
+    material_api.CreateStaticFrictionAttr(static_friction)
+    material_api.CreateDynamicFrictionAttr(dynamic_friction)
+    material_api.CreateRestitutionAttr(restitution)
+
+    binding_api = UsdShade.MaterialBindingAPI.Apply(stage.GetPrimAtPath(prim_path))
+    binding_api.Bind(
+        UsdShade.Material(material_prim),
+        bindingStrength=UsdShade.Tokens.strongerThanDescendants,
+        materialPurpose="physics",
+    )
+
+
+def _add_table_bumpers(stage, scene: SceneConfig) -> None:
+    """Add bumper rails around the billiards table so balls stay on the table.
+
+    The Cosmos billiards templates declare ``Bumper_N/S/E/W`` rails, but their
+    geometry references ``prism.usda``, an asset that is not shipped in this
+    venv, so the rails have no collision body and every ball rolls straight off
+    the table and out of the camera view. This helper re-reads the composed
+    ``TableSurface`` dimensions and adds four thin, bouncy rail colliders just
+    outside the playing surface so balls rebound back onto the table.
+    """
+
+    from pxr import Gf, UsdGeom
+
+    table_prim = stage.GetPrimAtPath(f"{scene.world_prim}/TableSurface")
+    if not table_prim or not table_prim.IsValid():
+        # No billiards table (e.g. the empty-ground template used by the
+        # granular category); nothing to bound.
+        return
+
+    xform = UsdGeom.Xformable(table_prim)
+    translate = Gf.Vec3d(0.0, 0.0, 0.0)
+    scale = Gf.Vec3d(1.0, 1.0, 1.0)
+    for op in xform.GetOrderedXformOps():
+        name = op.GetOpName()
+        if name == "xformOp:translate":
+            translate = Gf.Vec3d(*op.Get())
+        elif name == "xformOp:scale":
+            scale = Gf.Vec3d(*op.Get())
+
+    half_x = abs(scale[0]) / 2.0
+    half_y = abs(scale[1]) / 2.0
+    cx = translate[0]
+    cy = translate[1]
+
+    rail_h = 0.12
+    rail_t = 0.035
+    rail_z = rail_h / 2.0 - 0.02
+    rail_color = (0.30, 0.22, 0.13)
+    restitution = 0.75
+
+    rails = (
+        (
+            f"{scene.world_prim}/TableBumper_N",
+            (2 * half_x + 0.2, rail_t, rail_h),
+            (cx, cy + half_y, rail_z),
+        ),
+        (
+            f"{scene.world_prim}/TableBumper_S",
+            (2 * half_x + 0.2, rail_t, rail_h),
+            (cx, cy - half_y, rail_z),
+        ),
+        (
+            f"{scene.world_prim}/TableBumper_E",
+            (rail_t, 2 * half_y + 0.2, rail_h),
+            (cx + half_x, cy, rail_z),
+        ),
+        (
+            f"{scene.world_prim}/TableBumper_W",
+            (rail_t, 2 * half_y + 0.2, rail_h),
+            (cx - half_x, cy, rail_z),
+        ),
+    )
+    for path, size, pos in rails:
+        _add_static_collider(stage, path, size, rail_color, scene, translate=pos)
+        _bind_collider_physics_material(stage, path, restitution)
+
+
 def _define_episode_cameras(stage, episode_spec: EpisodeSpec) -> None:
     for camera in episode_spec.cameras.values():
         _define_camera(stage, camera)
@@ -852,6 +945,7 @@ def build_scene(
         # The Cosmos templates have a table but no floor; add an invisible
         # catch-all so balls that roll off the edge don't fall into the void.
         _add_invisible_ground(stage, scene)
+        _add_table_bumpers(stage, scene)
 
         stage.DefinePrim(_GENERATED_ROOT, "Xform")
         for object_spec in episode_spec.objects:
