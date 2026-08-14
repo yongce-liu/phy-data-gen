@@ -10,7 +10,6 @@ output_root: outputs/category_06
 
 backend: physx
 seed: 42
-template_seed: 42
 num_objects: 0
 
 scene:

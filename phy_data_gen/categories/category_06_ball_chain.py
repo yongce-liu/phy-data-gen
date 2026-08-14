@@ -75,15 +75,22 @@ def create_episode_spec(
             )
         )
 
+    # Place the striker far enough from the chain that there is a visible
+    # rolling approach before impact (a few tenths of a metre), matching the
+    # cat01 approach fix. The striker then travels *toward* the chain.
+    approach = rng.uniform(0.30, 0.55)
+
     def striker(side: float) -> None:
         balls.append(
             ball_spec(
                 "striker",
-                (side * (n_chain / 2.0 * spacing + 2.2 * r), 0.0, r),
+                (side * (n_chain / 2.0 * spacing + 2.2 * r + approach), 0.0, r),
                 r,
                 striker_mass,
                 make_material(restitution),
-                velocity=(side * speed, 0.0, 0.0),
+                # side=-1 is the -X end; it must move toward +X (the chain),
+                # i.e. the opposite of its placement side.
+                velocity=(-side * speed, 0.0, 0.0),
                 color=(0.9, 0.2, 0.2),
             )
         )
@@ -92,12 +99,13 @@ def create_episode_spec(
         striker(-1.0)
         striker(1.0)
     elif variant == "multi_ball_chain":
-        # 2-3 strikers hit one end.
-        for k in range(rng.randint(2, 3)):
+        # 2-3 strikers hit one end, staggered so they arrive in sequence.
+        n_strikers = rng.randint(2, 3)
+        for k in range(n_strikers):
             balls.append(
                 ball_spec(
                     f"striker_{k}",
-                    (-(n_chain / 2.0 * spacing + 2.2 * r) - k * 2.2 * r, 0.0, r),
+                    (-(n_chain / 2.0 * spacing + 2.2 * r + approach) - k * (0.15 + 2.2 * r), 0.0, r),
                     r,
                     striker_mass,
                     make_material(restitution),
