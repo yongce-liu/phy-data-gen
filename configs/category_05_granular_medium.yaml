@@ -10,7 +10,6 @@ output_root: outputs/category_05
 
 backend: physx
 seed: 42
-template_seed: 42
 num_objects: 0
 
 scene:
@@ -33,7 +32,7 @@ simulation:
   duration_seconds: 5.0
 
 render:
-  width: 960
-  height: 540
+  width: 1280
+  height: 720
   depth_scale_meters: 0.001
   rgb_encoder: h264_nvenc

@@ -20,11 +20,40 @@ def Xform "World"
             uniform token[] xformOpOrder = ["xformOp:translate", "xformOp:scale"]
         }
     }
+
+    # The Cosmos billiards templates carry their own DomeLight; the empty-ground
+    # template used by category 05 had none, so the rendered frames came out
+    # completely black. Add an equivalent environment dome so the sand tray and
+    # grains are lit. The HDR is the same Indoor hangar dome used by the
+    # billiards templates (fetched once and cached by Kit).
+    def DomeLight "EnvironmentLight" (
+        append apiSchemas = ["LightAPI", "ShadowAPI"]
+    )
+    {
+        uniform token[] xformOpOrder = ["xformOp:rotateXYZ"]
+        float guideRadius = 100000
+        color3f inputs:color = (1, 1, 1)
+        float inputs:colorTemperature = 6500
+        float inputs:diffuse = 1
+        bool inputs:enableColorTemperature = 0
+        float inputs:exposure = 1
+        float inputs:intensity = 900
+        bool inputs:normalize = 0
+        bool inputs:shadow:enable = 1
+        float inputs:specular = 1
+        asset inputs:texture:file = @https://omniverse-content-production.s3.us-west-2.amazonaws.com/Environments/2024_1/DomeLights/Indoor/small_hangar_01.hdr@
+        token inputs:texture:format = "latlong"
+        uniform token light:materialSyncMode = "noMaterialResponse"
+        uniform token light:shaderId = "DomeLight"
+        token visibility = "inherited"
+        custom bool visibleInPrimaryRay = 1
+        float3 xformOp:rotateXYZ = (0, 0, 138.68831)
+    }
 }
 
 # Top-level PhysicsScene, matching the Cosmos billiards templates and the
 # category configs' physics_scene_prim = /PhysicsScene.
 def PhysicsScene "PhysicsScene"
 {
+    bool physxScene:enableCCD = 1
 }
-
