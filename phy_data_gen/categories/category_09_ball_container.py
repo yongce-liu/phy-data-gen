@@ -61,18 +61,28 @@ def _add_container(objects: list, rng: random.Random) -> None:
         )
     )
     # Four thin walls rising around the floor.
+    # N/S walls (dy != 0) are long in X and thin in Y; E/W walls (dx != 0) are
+    # long in Y and thin in X. The z half-extent is HALF the wall height
+    # (half_extents are per-axis half sizes, scaled by 2), so a wall centred at
+    # z = _CONTAINER_H/2 spans exactly [0, _CONTAINER_H]. The previous code
+    # used the full height as the half-extent and swapped the long/short axes
+    # on the N/S walls, which made the walls 0.5 m tall slabs covering the
+    # container's centre -- balls landed on the rim instead of dropping in.
+    wall_half = _CONTAINER_H / 2.0
     for i, (dx, dy) in enumerate(((0, 1), (0, -1), (1, 0), (-1, 0))):
+        sx = h if dy != 0 else wall
+        sy = wall if dy != 0 else h
         objects.append(
             box_spec(
                 f"container_wall_{i}",
-                (dx * h, dy * h, _CONTAINER_H / 2.0),
+                (dx * h, dy * h, wall_half),
                 h,
                 1e9,
                 material,
                 color=(0.4, 0.4, 0.5),
                 dynamic=False,
                 record=False,
-                half_extents=(h if dx != 0 else wall, h if dy != 0 else wall, _CONTAINER_H),
+                half_extents=(sx, sy, wall_half),
             )
         )
 
