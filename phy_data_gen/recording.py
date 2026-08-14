@@ -292,19 +292,19 @@ class FrameRecorder:
                     "-c:v",
                     "h264_nvenc",
                     "-preset",
-                    "p4",
+                    "p5",
                     "-tune",
                     "hq",
                     "-rc",
                     "vbr",
                     "-cq",
-                    "18",
+                    "15",
                     "-b:v",
                     "0",
                 ]
             )
         else:
-            command.extend(["-c:v", "libx264", "-preset", "veryfast", "-crf", "18"])
+            command.extend(["-c:v", "libx264", "-preset", "medium", "-crf", "16"])
         command.extend(
             ["-pix_fmt", "yuv420p", "-movflags", "+faststart", str(output_path)]
         )
