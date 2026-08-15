@@ -72,6 +72,58 @@ def select_template_path(config: RunConfig) -> Path:
     return scene_rng.choice(templates)
 
 
+_MIN_TABLE_HALF = (0.63, 1.25)
+
+
+@functools.lru_cache(maxsize=None)
+def table_surface_half_extents(template_path: str | Path) -> tuple[float, float]:
+    """Return the (x, y) half-extents of a Cosmos billiards playing surface.
+
+    Reads ``/World/TableSurface`` (a unit quad scaled by ``xformOp:scale``)
+    straight from the template layer, so it needs no stage composition and no
+    Isaac runtime. Falls back to the smallest observed table so generated
+    balls still stay on the felt when the prim is missing.
+    """
+
+    from pxr import Sdf, Usd  # noqa: F401  # importing Usd registers the USDA plugin
+
+    layer = Sdf.Layer.FindOrOpen(str(Path(template_path).resolve()))
+    if layer is None:
+        return _MIN_TABLE_HALF
+    prim = layer.GetPrimAtPath("/World/TableSurface")
+    if prim is None:
+        return _MIN_TABLE_HALF
+    for prop in prim.properties:
+        if prop.name == "xformOp:scale":
+            scale = prop.default
+            if scale is not None and len(scale) >= 2:
+                return (float(scale[0]) / 2.0, float(scale[1]) / 2.0)
+    return _MIN_TABLE_HALF
+
+
+def ball_spawn_limits(
+    template_path: str | Path | None,
+    radius: float,
+    margin: float = 0.05,
+) -> tuple[float, float]:
+    """Return conservative (x, y) spawn limits for a ball centre.
+
+    The bumpers sit ~10% inside the surface edge, so the playable area is
+    shrunk by that factor, the ball radius, and a small safety margin. This
+    keeps every spawned ball fully on the felt even for the smallest
+    templates (X half-extent 0.63 m).
+    """
+
+    if template_path is None:
+        x_half, y_half = _MIN_TABLE_HALF
+    else:
+        x_half, y_half = table_surface_half_extents(template_path)
+    return (
+        max(0.2, 0.9 * x_half - radius - margin),
+        max(0.2, 0.9 * y_half - radius - margin),
+    )
+
+
 def _sample_orientation(rng: random.Random) -> tuple[float, float, float, float]:
     """Sample a uniformly random unit quaternion in (x, y, z, w) order."""
 
