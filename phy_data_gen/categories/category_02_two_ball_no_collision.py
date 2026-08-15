@@ -91,13 +91,16 @@ def _place_balls(scenario: dict, variant: str, rng: random.Random):
         vel1 = (0.0, v, 0.0)
         vel2 = (0.0, -v, 0.0)
     else:  # different_release
-        # Same lane, second ball releases after the first passes the crossing
-        # point. Realized by starting ball_b further back so it arrives late.
+        # Same lane, different release times: ball_b starts ahead in the
+        # lane and moves faster, so it "releases" first and outruns ball_a
+        # (which starts later at the rear). The front ball is always faster,
+        # so the separation only grows and the two never contact.
+        # The old code placed ball_b at y = 0.6 + v*delay (up to 5.1 m),
+        # far off the table, yet still passed validation.
         pos1 = (0.0, -0.6, r1)
-        delay = rng.uniform(0.4, 0.9)
-        pos2 = (0.0, 0.6 + v * delay, r2)
+        pos2 = (0.0, 0.6, r2)
         vel1 = (0.0, v, 0.0)
-        vel2 = (0.0, -v, 0.0)
+        vel2 = (0.0, v * rng.uniform(1.2, 1.6), 0.0)
 
     return pos1, pos2, vel1, vel2
 

@@ -49,6 +49,7 @@ class HighThroughputArgs:
     no_frames: bool = False
     resume: bool = False
     seed_start: int | None = None
+    seed_list: str | None = None  # comma-separated seeds; generates exactly these
     rendering_mode: str = "balanced"
     rgb_encoder: str | None = None  # override config; "libx264" avoids NVENC cap
 
@@ -189,18 +190,28 @@ def main() -> int:
         base_config.setdefault("render", {})["rgb_encoder"] = effective_encoder
         print(f"{tag} Using rgb_encoder={effective_encoder}", flush=True)
 
-    # Resume support.
-    if args.resume:
+    # Seed-list mode: regenerate exactly the given seeds (used to re-do a
+    # quality-fixed sub-range). Scenes are always rebuilt so fixes apply.
+    if args.seed_list:
+        seeds = [int(s) for s in args.seed_list.split(",") if s.strip()]
+        if not seeds:
+            print(f"{tag} Empty --seed-list. Exiting.")
+            return 0
+        remaining = len(seeds)
+        start_seed = seeds[0]
+    elif args.resume:
         last_seed = _find_last_episode(output_root, seed)
         start_seed = max(seed, last_seed + 1)
         print(f"{tag} Resume: starting seed {start_seed} (last OK: {last_seed})")
     else:
+        seeds = []
         start_seed = seed
 
-    remaining = args.num_episodes - (start_seed - seed)
-    if remaining <= 0:
-        print(f"{tag} All episodes done. Exiting.")
-        return 0
+    if not args.seed_list:
+        remaining = args.num_episodes - (start_seed - seed)
+        if remaining <= 0:
+            print(f"{tag} All episodes done. Exiting.")
+            return 0
 
     print(f"{tag} {'=' * 54}")
     print(f"{tag}  PHY-DATA-GEN  HIGH-THROUGHPUT  WORKER")
@@ -236,7 +247,7 @@ def main() -> int:
     base_cfg = load_config(args.config)
 
     for offset in range(remaining):
-        ep_seed = start_seed + offset
+        ep_seed = seeds[offset] if args.seed_list else start_seed + offset
         cfg = dataclasses.replace(base_cfg, seed=ep_seed)
 
         template_path = select_template_path(cfg)
@@ -245,7 +256,7 @@ def main() -> int:
         scene_dir = output_root / "scene" / run_id
         existing = (
             _load_existing_scene(scene_dir, cfg.scene.name, run_id, ep_seed)
-            if args.resume
+            if args.resume and not args.seed_list
             else None
         )
         if existing is not None:
