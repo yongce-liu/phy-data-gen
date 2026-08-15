@@ -96,7 +96,7 @@ def _sample_scenario(rng: random.Random, variant: str) -> dict:
     }
 
 
-def _place_balls(scenario: dict, variant: str, rng: random.Random):
+def _place_balls(scenario: dict, variant: str, rng: random.Random, max_radius: float):
     """Return (pos1, pos2, vel1, vel2, spin1) for the scenario.
 
     The collision happens at the origin.  Instead of sampling an arbitrary
@@ -105,11 +105,12 @@ def _place_balls(scenario: dict, variant: str, rng: random.Random):
     the speed is *derived* from them — so every episode shows a clear
     pre-contact motion phase of roughly ``approach_time`` seconds.
 
-    Positions are kept inside a ~0.9 m radius of the table centre: Cosmos
-    billiards tables differ in size (the smallest sampled x half-extent is
-    ~1.28 m) and the bumpers sit on top, so a ball spawned beyond ~1.0 m can
-    start over the rail or fall through a thin edge.  The collision point is
-    still the origin.
+    Positions are kept inside ``max_radius`` of the table centre, which is
+    derived from the template's actual playing surface (see
+    :func:`ball_spawn_limits`). Cosmos billiards tables differ a lot in size
+    — the smallest sampled X half-extent is 0.63 m — and the bumpers sit on
+    top, so a ball spawned beyond the surface can start over the rail or
+    fall through a thin edge.  The collision point is still the origin.
     """
 
     r1 = scenario["r1"]
@@ -117,14 +118,13 @@ def _place_balls(scenario: dict, variant: str, rng: random.Random):
     b = scenario["b"]
     s1 = scenario["spin1"]
     t_approach = scenario["approach_time"]
-    # Start positions stay within this radius of the origin so every ball is
-    # solidly on the playing surface regardless of the template's table size.
-    max_radius = 0.9
+    # Keep a usable minimum run-up while staying inside the spawn radius.
+    d_lo = min(0.3, max_radius * 0.6)
 
     if variant in ("head_on", "oblique", "eccentric"):
         # Ball a travels along +Y from y=-D into ball b parked at the
         # impact-parameter offset; contact at the origin.
-        D = rng.uniform(0.5, max_radius)
+        D = rng.uniform(d_lo, max_radius)
         pos1 = (0.0, -D, r1)
         pos2 = (b, 0.0, r2)
         sep = D - (r1 + r2)
@@ -133,7 +133,7 @@ def _place_balls(scenario: dict, variant: str, rng: random.Random):
         vel2 = (0.0, 0.0, 0.0)
     elif variant == "head_on_towards":
         # Both balls moving head-on, meet at the origin.
-        D = rng.uniform(0.5, max_radius)
+        D = rng.uniform(d_lo, max_radius)
         pos1 = (0.0, -D, r1)
         pos2 = (0.0, D * 0.4, r2)
         sep = (D + D * 0.4) - (r1 + r2)
@@ -142,7 +142,7 @@ def _place_balls(scenario: dict, variant: str, rng: random.Random):
         vel2 = (0.0, -rel * 0.33, 0.0)
     elif variant == "rear_end":
         # Catch-up: ball 2 ahead moving slower, ball 1 behind moving faster.
-        D = rng.uniform(0.5, max_radius)
+        D = rng.uniform(d_lo, max_radius)
         pos1 = (0.0, -D, r1)
         pos2 = (b, D * 0.4, r2)
         sep = (D + D * 0.4) - (r1 + r2)
@@ -155,7 +155,7 @@ def _place_balls(scenario: dict, variant: str, rng: random.Random):
         vel1 = (0.0, rel + lead_speed, 0.0)
     elif variant == "both_moving":
         # Ball 1 moves along +X, ball 2 along -X, collide at the origin.
-        D = rng.uniform(0.5, max_radius)
+        D = rng.uniform(d_lo, max_radius)
         pos1 = (-D, 0.0, r1)
         pos2 = (D * 0.4, 0.0, r2)
         sep = (D + D * 0.4) - (r1 + r2)
@@ -178,7 +178,13 @@ def create_episode_spec(
     rng = random.Random(config.seed)
     variant = _variant_for(config.seed)
     scenario = _sample_scenario(rng, variant)
-    pos1, pos2, vel1, vel2, s1 = _place_balls(scenario, variant, rng)
+    from phy_data_gen.episode import ball_spawn_limits
+
+    # Template-aware spawn radius: keep every ball fully on the playing
+    # surface for the episode's template (smallest tables are 0.63 m X).
+    x_lim, y_lim = ball_spawn_limits(template_path, max(scenario["r1"], scenario["r2"]))
+    max_radius = min(x_lim, y_lim)
+    pos1, pos2, vel1, vel2, s1 = _place_balls(scenario, variant, rng, max_radius)
 
     # Randomize ball colours each episode for visual variety.
     color_a = _random_color(rng)
