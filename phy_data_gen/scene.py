@@ -892,10 +892,11 @@ def _add_table_bumpers(stage, scene: SceneConfig) -> None:
         _bind_collider_physics_material(stage, path, restitution)
 
     # The low visible rail stops slow balls, but a fast ball can pop over the
-    # top edge (measured: 4 m/s launches it to z ~ 0.6, over the 0.12 m rail).
-    # Add an invisible wall above the rail so high-speed impacts rebound off
-    # the wall face instead of flying out of the scene. No visual change.
-    wall_h = 0.40
+    # top edge (measured: 4 m/s launches it to z ~ 0.6, over the 0.12 m rail),
+    # and high-speed ball-ball collisions can launch one to z ~ 0.45. Add an
+    # invisible wall above the rail so high-speed impacts rebound off the wall
+    # face instead of flying out of the scene. No visual change.
+    wall_h = 0.65
     wall_t = 0.05
     wall_z = wall_h / 2.0  # spans [0.0, 0.40]; overlaps the rail with no gap
     walls = (
