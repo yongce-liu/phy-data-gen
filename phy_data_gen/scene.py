@@ -652,6 +652,31 @@ def _add_static_collider(
     _bind_visual_color(stage, geometry.GetPrim(), color)
 
 
+def _add_invisible_collider(
+    stage,
+    prim_path: str,
+    size: tuple[float, float, float],
+    scene: SceneConfig,
+    translate: tuple[float, float, float] = (0.0, 0.0, 0.0),
+) -> None:
+    """Add a static box collider with no visual surface (renders nothing)."""
+
+    from pxr import Gf, Sdf, UsdGeom, UsdPhysics
+
+    stage.DefinePrim(prim_path, "Xform")
+    geometry = UsdGeom.Cube.Define(stage, f"{prim_path}/Geometry")
+    geometry.CreateSizeAttr(1.0)
+    xform = UsdGeom.Xformable(geometry.GetPrim())
+    precision = UsdGeom.XformOp.PrecisionDouble
+    xform.AddTranslateOp(precision=precision).Set(Gf.Vec3d(*translate))
+    xform.AddScaleOp(precision=precision).Set(Gf.Vec3d(size[0], size[1], size[2]))
+
+    collision_api = UsdPhysics.CollisionAPI.Apply(geometry.GetPrim())
+    collision_api.CreateSimulationOwnerRel().SetTargets(
+        [Sdf.Path(scene.physics_scene_prim)]
+    )
+
+
 def _build_procedural_backdrop(stage, scene: SceneConfig) -> None:
     """Author ground/table/walls/tray from ``scene.procedural``."""
 
@@ -864,6 +889,39 @@ def _add_table_bumpers(stage, scene: SceneConfig) -> None:
     )
     for path, size, pos in rails:
         _add_static_collider(stage, path, size, rail_color, scene, translate=pos)
+        _bind_collider_physics_material(stage, path, restitution)
+
+    # The low visible rail stops slow balls, but a fast ball can pop over the
+    # top edge (measured: 4 m/s launches it to z ~ 0.6, over the 0.12 m rail).
+    # Add an invisible wall above the rail so high-speed impacts rebound off
+    # the wall face instead of flying out of the scene. No visual change.
+    wall_h = 0.40
+    wall_t = 0.05
+    wall_z = wall_h / 2.0  # spans [0.0, 0.40]; overlaps the rail with no gap
+    walls = (
+        (
+            f"{scene.world_prim}/TableWall_N",
+            (2 * half_x + 0.2, wall_t, wall_h),
+            (cx, cy + half_y, wall_z),
+        ),
+        (
+            f"{scene.world_prim}/TableWall_S",
+            (2 * half_x + 0.2, wall_t, wall_h),
+            (cx, cy - half_y, wall_z),
+        ),
+        (
+            f"{scene.world_prim}/TableWall_E",
+            (wall_t, 2 * half_y + 0.2, wall_h),
+            (cx + half_x, cy, wall_z),
+        ),
+        (
+            f"{scene.world_prim}/TableWall_W",
+            (wall_t, 2 * half_y + 0.2, wall_h),
+            (cx - half_x, cy, wall_z),
+        ),
+    )
+    for path, size, pos in walls:
+        _add_invisible_collider(stage, path, size, scene, translate=pos)
         _bind_collider_physics_material(stage, path, restitution)
 
 

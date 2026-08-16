@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import math
 import random
+import re
 
 from phy_data_gen.categories.common import (
     ball_spec,
@@ -37,6 +38,35 @@ _VARIANTS = [
 ]
 
 
+def _table_half_extents(template_path: str | None) -> tuple[float, float]:
+    """Return (half_x, half_y) of the billiards table in ``template_path``.
+
+    Templates vary in size (observed half_x ranges 0.63-1.34 m), and spawns
+    that ignore that fall off the smaller tables. Parse the TableSurface
+    ``xformOp:scale`` directly from the template USD; fall back to the
+    smallest known table when the file cannot be read.
+    """
+
+    if not template_path:
+        return 0.63, 1.25
+    try:
+        text = open(template_path, encoding="utf-8").read()
+    except OSError:
+        return 0.63, 1.25
+    match = re.search(
+        r'def Mesh "TableSurface".*?xformOp:scale = \(([^)]*)\)',
+        text,
+        re.S,
+    )
+    if not match:
+        return 0.63, 1.25
+    try:
+        scale_x, scale_y, _ = (float(v) for v in match.group(1).split(","))
+    except ValueError:
+        return 0.63, 1.25
+    return abs(scale_x) / 2.0, abs(scale_y) / 2.0
+
+
 def _variant_for(seed: int) -> str:
     return _VARIANTS[seed % len(_VARIANTS)]
 
@@ -46,11 +76,14 @@ def _make_balls(
     variant: str,
     n: int,
     restitution: float,
+    table_half: tuple[float, float],
 ) -> list:
     """Build ``n`` non-overlapping balls for the variant."""
 
     r = rng.uniform(0.03, 0.045)
     balls = []
+    half_x, half_y = table_half
+    spawn_limit = 0.72 * min(half_x, half_y) - r
 
     if variant == "one_dimensional_chain":
         spacing = 2.05 * r
@@ -126,7 +159,8 @@ def _make_balls(
         # Balls on a ring aiming at the centre.
         angle_step = 2.0 * math.pi / n
         speed = rng.uniform(1.0, 4.0)
-        radius = rng.uniform(0.5, 0.9)
+        # Cap the ring to fit the smallest tables (half_x can be 0.63 m).
+        radius = min(rng.uniform(0.5, 0.9), max(0.30, spawn_limit))
         for i in range(n):
             angle = i * angle_step
             x = radius * math.cos(angle)
@@ -171,11 +205,12 @@ def _make_balls(
 
     # continuous — high-speed balls bouncing off the table bumpers.
     r = 0.04
+    limit = min(0.8, max(0.30, 0.72 * min(half_x, half_y) - r))
     for i in range(n):
         balls.append(
             ball_spec(
                 f"ball_{i}",
-                (rng.uniform(-0.8, 0.8), rng.uniform(-0.8, 0.8), r),
+                (rng.uniform(-limit, limit), rng.uniform(-limit, limit), r),
                 r,
                 0.1,
                 make_material(rng.uniform(0.3, 0.9)),
@@ -197,6 +232,7 @@ def create_episode_spec(
 ) -> EpisodeSpec:
     rng = random.Random(config.seed)
     variant = _variant_for(config.seed)
+    table_half = _table_half_extents(template_path)
 
     if variant == "one_dimensional_chain":
         n = rng.randint(3, 8)
@@ -206,7 +242,7 @@ def create_episode_spec(
         n = rng.randint(5, 20)
 
     restitution = rng.uniform(0.2, 1.0)
-    balls = _make_balls(rng, variant, n, restitution)
+    balls = _make_balls(rng, variant, n, restitution, table_half)
 
     return build_episode(
         config,

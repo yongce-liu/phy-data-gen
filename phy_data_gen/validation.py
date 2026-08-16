@@ -21,6 +21,10 @@ from pathlib import Path
 _MIN_FALL_METERS = 0.2
 _MIN_SPEED = 0.1
 _MAX_SPEED = 50.0
+# Tabletop scenes put the invisible catch-all ground at z = -0.6; any object
+# that drops below -0.05 has left the table/ground it started on. Reject those
+# episodes instead of keeping a ball that rolls out of view.
+_OFF_TABLE_Z = -0.05
 
 
 def _is_finite(values) -> bool:
@@ -40,6 +44,7 @@ def validate_episode(records: list[dict], require_fall: bool = True) -> dict:
             "moved": False,
             "fell": False,
             "max_speed_ok": False,
+            "off_table": True,
             "passed": False,
             "reason": "no records",
         }
@@ -48,6 +53,7 @@ def validate_episode(records: list[dict], require_fall: bool = True) -> dict:
     max_speed = 0.0
     moved = False
     fell = False
+    min_z = float("inf")
 
     # Track first/last Z per object to detect falling.
     first_z: dict[str, float] = {}
@@ -72,6 +78,7 @@ def validate_episode(records: list[dict], require_fall: bool = True) -> dict:
 
         object_id = record["object_id"]
         z = float(position[2])
+        min_z = min(min_z, z)
         if object_id not in first_z:
             first_z[object_id] = z
         last_z[object_id] = z
@@ -82,7 +89,14 @@ def validate_episode(records: list[dict], require_fall: bool = True) -> dict:
             break
 
     max_speed_ok = max_speed < _MAX_SPEED
-    passed = finite and moved and (fell or not require_fall) and max_speed_ok
+    off_table = min_z < _OFF_TABLE_Z
+    passed = (
+        finite
+        and moved
+        and (fell or not require_fall)
+        and max_speed_ok
+        and not off_table
+    )
 
     return {
         "finite": bool(finite),
@@ -90,6 +104,7 @@ def validate_episode(records: list[dict], require_fall: bool = True) -> dict:
         "fell": bool(fell),
         "max_speed_ok": bool(max_speed_ok),
         "max_speed": float(max_speed),
+        "off_table": bool(off_table),
         "passed": bool(passed),
     }
 
